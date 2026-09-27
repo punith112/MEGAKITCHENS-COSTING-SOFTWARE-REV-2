@@ -591,7 +591,7 @@ body{padding-top:44px}
     </div>
     <div class="cb-tip" onclick="clipNextTip()">next tip →</div>
   </div>
-  <img id="clipSvg" src="clippy.png" alt="Clip — assistant" onclick="clipPoke()">
+  <img id="clipSvg" src="clippy.png" alt="Clip — assistant" onclick="clipPoke()" onerror="this.outerHTML='<div id=&quot;clipSvg&quot; onclick=&quot;clipPoke()&quot; style=&quot;font-size:52px;cursor:pointer;filter:drop-shadow(0 3px 6px rgba(0,0,0,.22))&quot;>📎</div>'">
 </div>
 
 <!-- Printable quotation -->
@@ -998,202 +998,53 @@ function renderTables(){
     <td class="num">${c.totSheetWt?f2(c.totNetWt/c.totSheetWt*100):'0.00'}%</td>
     <td class="num">${c.totSheetWt?f2(c.wasteWt/c.totSheetWt*100):'0.00'}%</td></tr>`;
   $('rmTbl').innerHTML=rm;
+  if(!graphs.children.length) graphs.innerHTML='<p class="hint">Add parts with L×W to see nesting layouts.</p>';
 }
+
 function addAcc(){ accs.push({name:'',cost:0}); calc(); }
 
 /* ================= Tubes & sections ================= */
-function addTube(d){ tubes.push(Object.assign({name:'',shape:'Square',A:40,B:40,wall:2,len:1000,qty:1,mat:'MS CRCA'},d||{})); calc(); if(typeof clipReact==='function'&&!d) clipReact('addTube'); }
-function renderTubes(rows){
-  $('tubeList').innerHTML=tubes.map((t,i)=>{
-    const rect=t.shape==='Rectangular', round=t.shape==='Round';
-    return `<div class="tube-row">
-      <input placeholder="Name / description" value="${esc(t.name)}" oninput="tubes[${i}].name=this.value">
-      <select onchange="tubes[${i}].shape=this.value;calc()">
-        <option ${t.shape==='Square'?'selected':''}>Square</option>
-        <option ${t.shape==='Rectangular'?'selected':''}>Rectangular</option>
-        <option ${t.shape==='Round'?'selected':''}>Round</option>
-      </select>
-      <input type="number" step="1" value="${t.A}" title="${round?'Outer dia (mm)':'A (mm)'}" oninput="tubes[${i}].A=parseFloat(this.value)||0;calc()">
-      ${rect?`<input type="number" step="1" value="${t.B}" title="B (mm)" oninput="tubes[${i}].B=parseFloat(this.value)||0;calc()">`:'<span></span>'}
-      <input type="number" step="0.1" value="${t.wall}" title="Wall thk (mm)" oninput="tubes[${i}].wall=parseFloat(this.value)||0;calc()">
-      <input type="number" step="10" value="${t.len}" title="Length (mm)" oninput="tubes[${i}].len=parseFloat(this.value)||0;calc()">
-      <input type="number" min="1" value="${t.qty}" title="Qty" oninput="tubes[${i}].qty=parseFloat(this.value)||0;calc()">
-      <select onchange="tubes[${i}].mat=this.value;calc()">${matOptions(t.mat)}</select>
-      <button class="btn-d" onclick="tubes.splice(${i},1);calc()">✕</button>
-    </div>`;
-  }).join('')||'<p class="hint">No tubes yet — click + Add tube.</p>';
+function addTube(d){ tubes.push(Object.assign({name:'Square Tube',shape:'Square',A:40,B:40,wall:2,len:3000,qty:1,mat:'MS CRCA'},d||{})); calc(); }
+function delTube(i){ tubes.splice(i,1); calc(); }
+function renderTubes(tubeRows){
+  // editor rows (rebuilt from state each calc — keeps it simple and in sync)
+  const focused=document.activeElement;
+  const fid=focused&&focused.dataset?focused.dataset.tkey:null;
+  $('tubeList').innerHTML=tubes.map((t,i)=>`
+    <div class="tube-row">
+      <input data-tkey="${i}-name" placeholder="Description" value="${esc(t.name)}" oninput="tubes[${i}].name=this.value;calc()">
+      <select data-tkey="${i}-shape" onchange="tubes[${i}].shape=this.value;calc()">
+        ${['Square','Rectangular','Round'].map(s=>`<option ${t.shape===s?'selected':''}>${s}</option>`).join('')}</select>
+      <input data-tkey="${i}-A" type="number" step="1" title="${t.shape==='Round'?'OD (mm)':'A side (mm)'}" placeholder="${t.shape==='Round'?'OD':'A'}" value="${t.A}" oninput="tubes[${i}].A=parseFloat(this.value)||0;calc()">
+      <input data-tkey="${i}-B" type="number" step="1" title="B side (mm)" placeholder="B" value="${t.B}" ${t.shape!=='Rectangular'?'disabled':''} oninput="tubes[${i}].B=parseFloat(this.value)||0;calc()">
+      <input data-tkey="${i}-wall" type="number" step="0.1" title="Wall thk (mm)" placeholder="Wall" value="${t.wall}" oninput="tubes[${i}].wall=parseFloat(this.value)||0;calc()">
+      <input data-tkey="${i}-len" type="number" step="10" title="Length (mm)" placeholder="Len" value="${t.len}" oninput="tubes[${i}].len=parseFloat(this.value)||0;calc()">
+      <input data-tkey="${i}-qty" type="number" min="0" title="Qty" placeholder="Qty" value="${t.qty}" oninput="tubes[${i}].qty=parseFloat(this.value)||0;calc()">
+      <select data-tkey="${i}-mat" onchange="tubes[${i}].mat=this.value;calc()">${matOptions(t.mat)}</select>
+      <button class="btn-d" onclick="delTube(${i})">✕</button>
+    </div>`).join('');
+  if(fid){ const el=document.querySelector(`[data-tkey="${fid}"]`); if(el&&el.tagName==='INPUT'){el.focus(); const v=el.value; el.value=''; el.value=v;} }
+
+  const rows=tubeRows||[];
   $('tubeTbl').innerHTML=rows.length?
-    `<tr><th>Item</th><th>Section</th><th class="num">kg/m</th><th class="num">Len (mm)</th><th class="num">Qty</th>
-      <th class="num">Wt/pc (kg)</th><th class="num">Wt (kg)</th><th class="num">₹/kg</th><th class="num">Cost</th></tr>`+
-    rows.map(({t,csArea,kgm,wtPc,wt,cost,mt,B})=>{
-      const sec=t.shape==='Round'?`⌀${t.A} × ${t.wall}t`:`${t.A}×${B} × ${t.wall}t`;
-      return `<tr><td>${esc(t.name)||sec}</td><td>${t.shape} ${sec} · ${esc(t.mat)}</td>
-        <td class="num">${f3(kgm)}</td><td class="num">${t.len}</td><td class="num">${t.qty}</td>
-        <td class="num">${f3(wtPc)}</td><td class="num">${f3(wt)}</td><td class="num">${f2(mt.rate)}</td>
-        <td class="num">${fmt(cost)}</td></tr>`;
+    `<tr><th>Description</th><th>Section</th><th>Material</th><th class="num">Len (mm)</th><th class="num">Qty</th>
+     <th class="num">kg/m</th><th class="num">Wt/pc (kg)</th><th class="num">Total wt (kg)</th><th class="num">Rate ₹/kg</th><th class="num">Cost</th></tr>`+
+    rows.map(({t,mt,kgm,wtPc,wt,cost,B})=>{
+      const sec=t.shape==='Round'?`⌀ ${t.A} × ${t.wall}`:`${t.A} × ${t.shape==='Square'?t.A:t.B} × ${t.wall}`;
+      return `<tr><td>${esc(t.name)}</td><td>${sec} mm ${t.shape}</td><td>${esc(mt.name)}</td>
+        <td class="num">${t.len}</td><td class="num">${t.qty}</td>
+        <td class="num">${f3(kgm)}</td><td class="num">${f3(wtPc)}</td><td class="num">${f3(wt)}</td>
+        <td class="num">${f2(mt.rate)}</td><td class="num"><b>${f2(cost)}</b></td></tr>`;
     }).join('')+
-    `<tr class="total"><td colspan="6">Tubes total</td><td class="num">${f3(rows.reduce((a,r)=>a+r.wt,0))} kg</td><td></td>
-      <td class="num">${fmt(rows.reduce((a,r)=>a+r.cost,0))}</td></tr>`:
-    `<tr><td style="color:#77848F">No tubes added.</td></tr>`;
+    `<tr class="total"><td colspan="7">Tubes subtotal</td><td class="num">${f3(rows.reduce((a,r)=>a+r.wt,0))} kg</td><td></td><td class="num">${fmt(rows.reduce((a,r)=>a+r.cost,0))}</td></tr>`:
+    `<tr><td style="color:#77848F">No tubes added. Use “+ Add tube” for square / rectangular / round sections.</td></tr>`;
 }
-
-/* ================= DXF import ================= */
-function bulgePts(x1,y1,x2,y2,b){
-  const chord=Math.hypot(x2-x1,y2-y1);
-  if(chord<1e-9||!b) return [{x:x2,y:y2}];
-  const theta=4*Math.atan(b);                      // included angle (signed)
-  const r=chord/2/Math.abs(Math.sin(theta/2));
-  const d=chord/2/Math.tan(theta/2);               // apothem (signed)
-  const mx=(x1+x2)/2, my=(y1+y2)/2, ux=(y2-y1)/chord, uy=(x2-x1)/chord;
-  const cx=mx-d*ux, cy=my-d*uy;
-  const a0=Math.atan2(y1-cy,x1-cx);
-  const n=Math.max(4,Math.ceil(Math.abs(theta)/(Math.PI/18)));
-  const pts=[];
-  for(let i=1;i<=n;i++){const a=a0+theta*i/n; pts.push({x:cx+r*Math.cos(a),y:cy+r*Math.sin(a)});}
-  return pts;
-}
-function arcPts(cx,cy,r,a0,a1){
-  let sweep=a1-a0; while(sweep<=0)sweep+=2*Math.PI;
-  const n=Math.max(4,Math.ceil(sweep/(Math.PI/18)));
-  const pts=[];
-  for(let i=0;i<=n;i++){const a=a0+sweep*i/n;pts.push({x:cx+r*Math.cos(a),y:cy+r*Math.sin(a)});}
-  return pts;
-}
-function parseDXF(text){
-  const lines=text.split(/\r?\n/);
-  const pairs=[];
-  for(let i=0;i<lines.length-1;i+=2) pairs.push([lines[i].trim(),lines[i+1]]);
-  let units=4; // $INSUNITS, 4 = mm (default per user: mm drawings)
-  pairs.forEach(([c,v])=>{ if(c==='70'&&pairs.indexOf([c,v])>-1){} });
-  // scan HEADER for $INSUNITS
-  for(let i=0;i<pairs.length-1;i++){
-    if(pairs[i][0]==='9'&&pairs[i][1]==='$INSUNITS'&&pairs[i+1][0]==='70'){units=parseInt(pairs[i+1][1])||4;break;}
-  }
-  const scale=units===1?25.4:units===2?304.8:units===3?1609344:units===5?10:units===6?1000:1; // → mm
-  const segs=[];  // {pts:[{x,y}], closed:bool}
-  let i=0;
-  const val=(code,def)=>{ const p=pairs.find(q=>q[0]===code); return p?parseFloat(p[1]):def; };
-  while(i<pairs.length){
-    const [code,v]=pairs[i];
-    if(code==='0'&&v==='LINE'){
-      let x1=0,y1=0,x2=0,y2=0; i++;
-      while(i<pairs.length&&pairs[i][0]!=='0'){const[c,vv]=pairs[i];
-        if(c==='10')x1=+vv; if(c==='20')y1=+vv; if(c==='11')x2=+vv; if(c==='21')y2=+vv; i++;}
-      segs.push({pts:[{x:x1,y:y1},{x:x2,y:y2}],closed:false}); continue;
-    }
-    if(code==='0'&&v==='CIRCLE'){
-      let cx=0,cy=0,r=0; i++;
-      while(i<pairs.length&&pairs[i][0]!=='0'){const[c,vv]=pairs[i];
-        if(c==='10')cx=+vv; if(c==='20')cy=+vv; if(c==='40')r=+vv; i++;}
-      segs.push({pts:arcPts(cx,cy,r,0,2*Math.PI),closed:true}); continue;
-    }
-    if(code==='0'&&v==='ARC'){
-      let cx=0,cy=0,r=0,a0=0,a1=360; i++;
-      while(i<pairs.length&&pairs[i][0]!=='0'){const[c,vv]=pairs[i];
-        if(c==='10')cx=+vv; if(c==='20')cy=+vv; if(c==='40')r=+vv; if(c==='50')a0=+vv; if(c==='51')a1=+vv; i++;}
-      segs.push({pts:arcPts(cx,cy,r,a0*Math.PI/180,a1*Math.PI/180),closed:false}); continue;
-    }
-    if(code==='0'&&(v==='LWPOLYLINE'||v==='POLYLINE')){
-      const pts=[]; let closed=false, cur=null; i++;
-      while(i<pairs.length&&pairs[i][0]!=='0'){
-        const[c,vv]=pairs[i];
-        if(v==='LWPOLYLINE'){
-          if(c==='70'&&(+vv&1))closed=true;
-          if(c==='10'){cur={x:+vv,y:0,b:0};pts.push(cur);}
-          if(c==='20'&&cur)cur.y=+vv;
-          if(c==='42'&&cur)cur.b=+vv;
-        }else{
-          if(c==='70'&&(+vv&1))closed=true;
-          if(vv==='VERTEX'){i++;
-            let x=0,y=0,b=0;
-            while(i<pairs.length&&pairs[i][0]!=='0'&&!(pairs[i][0]==='0')){const[c2,v2]=pairs[i];
-              if(c2==='10')x=+v2; if(c2==='20')y=+v2; if(c2==='42')b=+v2; i++;}
-            pts.push({x,y,b}); continue;
-          }
-        }
-        i++;
-      }
-      // expand bulges
-      const out=[];
-      for(let k=0;k<pts.length;k++){
-        out.push({x:pts[k].x,y:pts[k].y});
-        const nx=pts[(k+1)%pts.length];
-        if(pts[k].b&&(k<pts.length-1||closed))
-          bulgePts(pts[k].x,pts[k].y,nx.x,nx.y,pts[k].b).slice(0,-1).forEach(p=>out.push(p));
-      }
-      if(pts.length>1) segs.push({pts:out,closed}); continue;
-    }
-    i++;
-  }
-  if(!segs.length) return null;
-  // scale to mm
-  segs.forEach(s=>s.pts.forEach(p=>{p.x*=scale;p.y*=scale;}));
-  // chain segments into contours (endpoint proximity)
-  const contours=[];
-  const tol=()=>0.05;
-  const unused=[...segs];
-  while(unused.length){
-    let s=unused.shift();
-    let chain=[...s.pts]; let closed=s.closed;
-    let moved=true;
-    while(moved&&!closed){
-      moved=false;
-      for(let j=0;j<unused.length;j++){
-        const t=unused[j], a=chain[0], b=chain[chain.length-1], p=t.pts[0], q=t.pts[t.pts.length-1];
-        const near=(u,v)=>Math.hypot(u.x-v.x,u.y-v.y)<0.05;
-        if(near(b,p)){chain.push(...t.pts.slice(1));unused.splice(j,1);moved=true;}
-        else if(near(b,q)){chain.push(...t.pts.slice(0,-1).reverse());unused.splice(j,1);moved=true;}
-        else if(near(a,q)){chain.unshift(...t.pts.slice(0,-1));unused.splice(j,1);moved=true;}
-        else if(near(a,p)){chain.unshift(...t.pts.slice(1).reverse());unused.splice(j,1);moved=true;}
-        else continue;
-        break;
-      }
-      if(Math.hypot(chain[0].x-chain[chain.length-1].x,chain[0].y-chain[chain.length-1].y)<0.05) closed=true;
-    }
-    contours.push({pts:chain,closed});
-  }
-  // bounds & metrics
-  let minX=1e18,minY=1e18,maxX=-1e18,maxY=-1e18,cutLen=0,pierces=0;
-  contours.forEach(ct=>{
-    for(let k=1;k<ct.pts.length;k++) cutLen+=Math.hypot(ct.pts[k].x-ct.pts[k-1].x,ct.pts[k].y-ct.pts[k-1].y);
-    if(ct.closed) pierces++;
-    ct.pts.forEach(p=>{minX=Math.min(minX,p.x);minY=Math.min(minY,p.y);maxX=Math.max(maxX,p.x);maxY=Math.max(maxY,p.y);});
-  });
-  // normalize: origin 0,0, y-down (DXF is y-up)
-  contours.forEach(ct=>ct.pts.forEach(p=>{p.x-=minX;p.y=maxY-p.y;}));
-  return {L:maxX-minX, W:maxY-minY, cutLen:cutLen/1000, pierces, contours, units};
-}
-function bulkDXF(inp){
-  const files=[...inp.files]; if(!files.length) return;
-  let done=0, added=0;
-  files.forEach(f=>{
-    const rd=new FileReader();
-    rd.onload=e=>{
-      const d=parseDXF(e.target.result);
-      done++;
-      if(d&&d.L>0&&d.W>0){
-        const key=f.name.replace(/\.dxf$/i,'').toLowerCase();
-        const hit=parts.find(p=>((p.partNo||'').toLowerCase()===key||(p.name||'').toLowerCase()===key));
-        const rec={L:d.L,W:d.W,cutLen:d.cutLen,pierces:d.pierces||1,contours:d.contours};
-        if(hit){ Object.assign(hit,rec); }
-        else{ addPart(false,{partNo:f.name.replace(/\.dxf$/i,''),name:f.name.replace(/\.dxf$/i,''),...rec}); added++; }
-      }
-      if(done===files.length){
-        renderParts(); calc();
-        if(typeof clipReact==='function') clipReact('dxf');
-      }
-    };
-    rd.readAsText(f);
-  });
-  inp.value='';
-}
-
-/* ================= BOM import/export ================= */
+/* ================= BOM import / template ================= */
 function bomTemplate(){
   const ws=XLSX.utils.aoa_to_sheet([
-    ['Sl No','Part Name','Part No','Type','Qty','Material','Thickness','L','W','CutLen(m)','Pierces','Bends','WeldIn','PC'],
-    [1,'Main Frame Assembly','MEG-001','Parent',1,'MS CRCA',2,500,400,2.1,6,4,12,'sf'],
-    [2,'Mounting Bracket','MEG-002','Child',4,'MS CRCA',1.5,150,100,0.6,4,2,0,'none'],
+    ['Sl No','Part Name','Part No','Type','Qty','Material','Thickness','L','W','CutLen(m)','Pierces','Bends','Weld(in)','PowderCoat'],
+    [1,'Base Plate','MEG-001','Parent',2,'MS',2,400,300,1.6,4,2,0,'sf'],
+    [2,'Side Bracket','MEG-002','Child',8,'SS',1.5,150,80,0.6,2,3,0,'none']
   ]);
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'BOM');
   XLSX.writeFile(wb,'MEGAVERKS_BOM_Template.xlsx');
@@ -1202,572 +1053,936 @@ function importBOM(inp){
   const f=inp.files[0]; if(!f) return;
   const rd=new FileReader();
   rd.onload=e=>{
-    const wb=XLSX.read(e.target.result,{type:'array'});
-    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
-    let n=0;
-    rows.forEach(rw=>{
-      const name=String(rw['Part Name']||rw['Name']||'').trim(); if(!name) return;
-      addPart(String(rw['Type']).toLowerCase()==='parent',{
-        name, partNo:String(rw['Part No']||''), qty:+rw['Qty']||1,
-        mat:String(rw['Material']||'MS CRCA'), thk:+rw['Thickness']||1.5,
-        L:+rw['L']||100, W:+rw['W']||100, cutLen:+rw['CutLen(m)']||0.5,
-        pierces:+rw['Pierces']||1, bends:+rw['Bends']||0, weldIn:+rw['WeldIn']||0,
-        pc:String(rw['PC']||'none')});
-      n++;
-    });
-    if(typeof clipReact==='function'&&n) clipReact('bom');
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+      let n=0;
+      rows.forEach(rw=>{
+        const g=k=>{const key=Object.keys(rw).find(h=>h.toLowerCase().replace(/[^a-z]/g,'')===k);return key?rw[key]:'';};
+        const name=String(g('partname')||'').trim(); if(!name) return;
+        addPart(String(g('type')).toLowerCase().startsWith('par'),{
+          partNo:String(g('partno')||''), name,
+          qty:parseFloat(g('qty'))||1,
+          mat:(()=>{const s=String(g('material')).toLowerCase();
+            const exact=MTL.find(m=>m.name.toLowerCase()===s||s.includes(m.name.toLowerCase()));
+            if(exact) return exact.name;
+            if(s.startsWith('ss')) return MTL.find(m=>/^ss/i.test(m.name))?.name||MTL[0].name;
+            if(s.startsWith('ms')||s.includes('crca')||s.includes('hrpo')) return MTL.find(m=>/^ms/i.test(m.name))?.name||MTL[0].name;
+            return MTL[0].name;})(),
+          thk:parseFloat(g('thickness'))||1.5,
+          L:parseFloat(g('l'))||100, W:parseFloat(g('w'))||100,
+          cutLen:parseFloat(g('cutlenm'))||0, pierces:parseFloat(g('pierces'))||0,
+          bends:parseFloat(g('bends'))||0, weldIn:parseFloat(g('weldin'))||0,
+          pc:['sf','kg'].includes(String(g('powdercoat')).toLowerCase())?String(g('powdercoat')).toLowerCase():'none',
+          proc:{laser:true,punch:false,bend:(parseFloat(g('bends'))||0)>0,weld:(parseFloat(g('weldin'))||0)>0,pc:String(g('powdercoat')).toLowerCase()!=='none'&&!!g('powdercoat')}
+        }); n++;
+      });
+      renderParts(); calc();
+      alert(n+' part(s) imported from BOM.');
+    }catch(err){ alert('BOM import failed: '+err.message); }
   };
   rd.readAsArrayBuffer(f); inp.value='';
 }
 
-/* ================= Interactive nesting board ================= */
-let NX={placed:[],sel:-1};
-const nxKey=s=>s.mat+'|'+s.thk+'|'+s.L+'|'+s.W;
-function nxGap(){ return Math.max(0,parseFloat($('nxGap').value)||0); }
-function nxSheetDef(){
-  const sel=$('nxSheetSel'); if(!sel||!sel.value) return null;
-  return INV.find(s=>nxKey(s)===sel.value)||null;
-}
-function partGeom(p,deg){
-  const rad=deg*Math.PI/180, cs=Math.cos(rad), sn=Math.sin(rad);
-  if(p.contours&&p.contours.length){
-    const cts=p.contours.map(ct=>({closed:ct.closed,pts:ct.pts.map(q=>({x:q.x*cs-q.y*sn,y:q.x*sn+q.y*cs}))}));
-    let minX=1e18,minY=1e18,maxX=-1e18,maxY=-1e18;
-    cts.forEach(ct=>ct.pts.forEach(q=>{minX=Math.min(minX,q.x);minY=Math.min(minY,q.y);maxX=Math.max(maxX,q.x);maxY=Math.max(maxY,q.y);}));
-    cts.forEach(ct=>ct.pts.forEach(q=>{q.x-=minX;q.y-=minY;}));
-    return {contours:cts,L:maxX-minX,W:maxY-minY};
+/* ================= DXF parsing (true contours: outer profile + inner holes) ================= */
+/* Flattens a bulge segment (LWPOLYLINE/POLYLINE arc) into points. */
+function bulgePts(p1,p2,bulge){
+  if(!bulge) return [p2];
+  const dx=p2[0]-p1[0], dy=p2[1]-p1[1];
+  const chord=Math.hypot(dx,dy); if(!chord) return [p2];
+  const theta=4*Math.atan(bulge);                 // included angle (signed)
+  const R=chord/2/Math.sin(theta/2);
+  const mx=(p1[0]+p2[0])/2, my=(p1[1]+p2[1])/2;
+  const d=chord/2/Math.tan(theta/2);              // apothem (signed)
+  const cx=mx-d*dy/chord, cy=my+d*dx/chord;
+  const a0=Math.atan2(p1[1]-cy,p1[0]-cx);
+  const steps=Math.max(4,Math.ceil(Math.abs(theta)/(Math.PI/36)));
+  const out=[];
+  for(let i=1;i<=steps;i++){
+    const a=a0+(theta>0?1:-1)*Math.abs(theta)*i/steps;
+    out.push([cx+Math.abs(R)*Math.cos(a), cy+Math.abs(R)*Math.sin(a)]);
   }
-  // rectangle fallback
-  const c=Math.abs(p.L*cs)+Math.abs(p.W*sn), d=Math.abs(p.L*sn)+Math.abs(p.W*cs);
-  return {contours:[{closed:true,pts:[{x:0,y:0},{x:c,y:0},{x:c,y:d},{x:0,y:d}]}],L:c,W:d};
+  return out;
 }
-function geomArea(g){
-  let a=0;
-  g.contours.forEach(ct=>{
-    let s=0;
-    for(let i=0;i<ct.pts.length;i++){
-      const p=ct.pts[i], q=ct.pts[(i+1)%ct.pts.length];
-      s+=p.x*q.y-q.x*p.y;
+function arcPts(cx,cy,r,a1,a2,ccw){               // degrees → flattened arc
+  let span=(a2-a1)%360; if(span<=0) span+=360;
+  const steps=Math.max(8,Math.ceil(span/5));
+  const out=[];
+  for(let i=0;i<=steps;i++){
+    const a=(a1+(ccw===false?-span:span)*i/steps)*Math.PI/180;
+    out.push([cx+r*Math.cos(a), cy+r*Math.sin(a)]);
+  }
+  return out;
+}
+/* Chain loose segments into closed/open contours by endpoint proximity. */
+function chainSegments(segs,tol){
+  const contours=segs.filter(s=>s.closed).map(s=>({pts:s.pts.slice(),closed:true}));
+  let open=segs.filter(s=>!s.closed).map(s=>s.pts.slice());
+  let merged=true, guard=0;
+  while(merged&&guard++<500){
+    merged=false;
+    outer:
+    for(let i=0;i<open.length;i++){
+      for(let j=i+1;j<open.length;j++){
+        const a=open[i], b=open[j];
+        const pairs=[[a[a.length-1],b[0],x=>a.concat(b.slice(1))],
+                     [a[a.length-1],b[b.length-1],x=>a.concat(b.slice(0,-1).reverse())],
+                     [a[0],b[0],x=>b.slice(1).concat(a)],
+                     [a[0],b[b.length-1],x=>b.slice(0,-1).concat(a)]];
+        for(const [p,q,fn] of pairs){
+          if(Math.hypot(p[0]-q[0],p[1]-q[1])<=tol){
+            open[i]=fn(); open.splice(j,1); merged=true; continue outer;
+          }
+        }
+      }
     }
-    a+=s/2;
+  }
+  open.forEach(pts=>{
+    const closed=pts.length>2&&Math.hypot(pts[0][0]-pts[pts.length-1][0],pts[0][1]-pts[pts.length-1][1])<=tol;
+    contours.push({pts,closed});
   });
-  return Math.abs(a);
+  return contours;
 }
-function nxFits(g,x,y,ignore){
-  const s=nxSheetDef(); if(!s) return false;
-  const gap=nxGap();
-  if(x<0||y<0||x+g.L>s.L+1e-6||y+g.W>s.W+1e-6) return false;
-  for(const q of NX.placed){
-    if(q===ignore) continue;
-    const qg=partGeom(q.part,q.rot);
-    if(x-gap/2<q.x+qg.L && x+g.L+gap/2>q.x && y-gap/2<q.y+qg.W && y+g.W+gap/2>q.y) return false;
+function parseDXF(txt){
+  const lines=txt.split(/\r?\n/);
+  // units: $INSUNITS (1=in, 4=mm). We receive mm — convert only if file says otherwise.
+  let scale=1;
+  const iu=lines.findIndex(l=>l.trim()==='$INSUNITS');
+  if(iu>-1){ for(let j=iu+1;j<Math.min(iu+8,lines.length-1);j++){ if(lines[j].trim()==='70'){ const u=parseInt(lines[j+1]); if(u===1) scale=25.4; else if(u===2) scale=304.8; else if(u===5) scale=10; else if(u===6) scale=1000; break; } } }
+  const segs=[]; let minX=1e18,minY=1e18,maxX=-1e18,maxY=-1e18;
+  const pt=(x,y)=>{minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);};
+  let i=0;
+  const gv=j=>parseFloat(lines[j]);
+  while(i<lines.length-1){
+    const code=lines[i].trim(), val=(lines[i+1]||'').trim();
+    if(code==='0'){
+      if(val==='LINE'){
+        let x1=0,y1=0,x2=0,y2=0; i+=2;
+        while(i<lines.length-1&&lines[i].trim()!=='0'){
+          const c2=lines[i].trim(),v2=gv(i+1);
+          if(c2==='10')x1=v2; if(c2==='20')y1=v2; if(c2==='11')x2=v2; if(c2==='21')y2=v2; i+=2;
+        }
+        segs.push({pts:[[x1*scale,y1*scale],[x2*scale,y2*scale]],closed:false});
+        pt(x1*scale,y1*scale);pt(x2*scale,y2*scale); continue;
+      }
+      if(val==='CIRCLE'||val==='ARC'){
+        let x=0,y=0,rad=0,a1=0,a2=360; i+=2;
+        while(i<lines.length-1&&lines[i].trim()!=='0'){
+          const c2=lines[i].trim(),v2=gv(i+1);
+          if(c2==='10')x=v2; if(c2==='20')y=v2; if(c2==='40')rad=v2;
+          if(c2==='50')a1=v2; if(c2==='51')a2=v2; i+=2;
+        }
+        const pts=arcPts(x,y,rad,a1,val==='CIRCLE'?a1+360:a2).map(p=>[p[0]*scale,p[1]*scale]);
+        segs.push({pts,closed:val==='CIRCLE'});
+        pts.forEach(p=>pt(p[0],p[1])); continue;
+      }
+      if(val==='LWPOLYLINE'||val==='POLYLINE'){
+        i+=2; let raw=[],closed=false,guard=0;
+        while(i<lines.length-1&&lines[i].trim()!=='0'&&guard++<50000){
+          const c2=lines[i].trim(),v2=gv(i+1);
+          if(c2==='10')raw.push({x:v2,y:0,b:0});
+          if(c2==='20'&&raw.length)raw[raw.length-1].y=v2;
+          if(c2==='42'&&raw.length)raw[raw.length-1].b=v2;
+          if(c2==='70'&&(v2&1))closed=true; i+=2;
+        }
+        const pts=[];
+        for(let k=0;k<raw.length;k++){
+          const p1=[raw[k].x*scale,raw[k].y*scale];
+          const nxt=raw[k+1]||(closed?raw[0]:null);
+          pts.push(p1);
+          if(nxt) bulgePts(p1,[nxt.x*scale,nxt.y*scale],raw[k].b||0).forEach(p=>{ if(pts[pts.length-1][0]!==p[0]||pts[pts.length-1][1]!==p[1]) pts.push(p); });
+        }
+        if(closed&&pts.length>1) pts.pop();   // closing point duplicates first
+        if(pts.length>1){ segs.push({pts,closed}); pts.forEach(p=>pt(p[0],p[1])); }
+        continue;
+      }
+    }
+    i++;
+  }
+  if(minX>maxX) return null;
+  const contours=chainSegments(segs, Math.max(0.01,(maxX-minX+maxY-minY)/4000));
+  let cut=0, pierces=0;
+  contours.forEach(ct=>{
+    for(let k=1;k<ct.pts.length;k++) cut+=Math.hypot(ct.pts[k][0]-ct.pts[k-1][0],ct.pts[k][1]-ct.pts[k-1][1]);
+    if(ct.closed){ cut+=Math.hypot(ct.pts[0][0]-ct.pts[ct.pts.length-1][0],ct.pts[0][1]-ct.pts[ct.pts.length-1][1]); pierces++; }
+  });
+  // normalize: origin at 0,0 and Y flipped for screen (SVG) coordinates
+  const W=maxX-minX, H=maxY-minY;
+  const norm=contours.map(ct=>({closed:ct.closed, pts:ct.pts.map(p=>[+(p[0]-minX).toFixed(3), +(maxY-p[1]).toFixed(3)])}));
+  return {L:+W.toFixed(1), W:+H.toFixed(1), cutLen:+(cut/1000).toFixed(3), pierces:Math.max(1,pierces), contours:norm, units:scale===1?'mm':'converted-to-mm'};
+}
+function bulkDXF(inp){
+  const files=[...inp.files]; if(!files.length) return;
+  let done=0;
+  files.forEach(f=>{
+    const rd=new FileReader();
+    rd.onload=e=>{
+      const d=parseDXF(e.target.result);
+      const base=f.name.replace(/\.dxf$/i,'');
+      const match=parts.find(p=>p.partNo&&p.partNo.toLowerCase()===base.toLowerCase())||
+                  parts.find(p=>p.name&&p.name.toLowerCase()===base.toLowerCase());
+      if(d){
+        if(match){ Object.assign(match,{L:d.L,W:d.W,cutLen:d.cutLen,pierces:d.pierces,contours:d.contours}); }
+        else addPart(false,{partNo:base,name:base,L:d.L,W:d.W,cutLen:d.cutLen,pierces:d.pierces,contours:d.contours});
+      }
+      if(++done===files.length){ renderParts(); calc(); }
+    };
+    rd.readAsText(f);
+  });
+  inp.value='';
+}
+
+/* ================= Excel export WITH FORMULAS ================= */
+function exportXLS(){
+  if(!CALC||!CALC.rows.length){alert('Add at least one part first.');return;}
+  const c=CALC, r=c.rates;
+  const wb=XLSX.utils.book_new();
+  const F=f=>({f}); const N=v=>({t:'n',v});
+
+  /* --- Rates sheet (all downstream formulas reference these cells) --- */
+  const mtlFirst=21, mtlLast=mtlFirst+MTL.length-1;   // material table rows on Rates sheet
+  const ratesA=[
+    ['MEGAVERKS TECHNOLOGIES — RATE MASTER','',''],
+    ['MOQ / Order Qty',N(c.moq)],
+    ['Scrap allowance (%)',N(r.scrap*100)],['Piercing (₹/pierce)',N(r.pierce)],
+    ['Laser MS (₹/m)',N(r.laserMS)],['Laser SS (₹/m)',N(r.laserSS)],
+    ['Punch throughput (mm/sec)',N(r.punchMM)],['Punch machine (₹/hour)',N(r.punchHr)],
+    ['Bend ₹ (Qty<100)',N(r.bendLo)],['Bend ₹ (Qty≥100)',N(r.bendHi)],
+    ['Weld ₹/in (Qty<100)',N(r.weldLo)],['Weld ₹/in (Qty≥100)',N(r.weldHi)],
+    ['Powder coat ₹/kg',N(r.pcKg)],['Powder coat ₹/sq.ft',N(r.pcSf)],
+    ['Nesting gap (mm)',N(c.gap)],['Edge margin (mm)',N(c.edge)],
+    ['Assembly ₹ / parent assembly',N(r.asm)],
+    [],
+    ['MATERIAL MASTER','',''],
+    ['Material type','Rate ₹/kg','Density g/cc'],
+    ...MTL.map(m=>[m.name,N(m.rate),N(m.den)]),
+    [],
+    ['RAW MATERIAL STORE (sheet inventory)',''],
+    ['Material','Thickness','L (mm)','W (mm)','Qty in store'],
+    ...INV.map(s=>[s.mat,N(s.thk),N(s.L),N(s.W),N(s.qty)])
+  ];
+  const wsR=XLSX.utils.aoa_to_sheet(ratesA);
+  wsR['!cols']=[{wch:28},{wch:14},{wch:12},{wch:12},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,wsR,'Rates');
+
+  /* --- Parts sheet: inputs + formula columns --- */
+  const head=['Sl No','Part No','Part Name','Type','Qty','Material','Thk (mm)','L (mm)','W (mm)',
+    'Area/pc (m²)','Density','Wt/pc (kg)','Total Wt (kg)','Mat Rate ₹/kg','Material ₹',
+    'CutLen m/pc','Laser ₹/m','Laser ₹','Pierces/pc','Pierce ₹',
+    'Bends/pc','Bend ₹/bend','Bend ₹','Weld in/pc','Weld ₹/in','Weld ₹',
+    'PC area sq.ft','PC ₹','Part Total ₹'];
+  const aoa=[head];
+  c.rows.forEach((rw,i)=>{
+    const R2=i+2, p=rw.p;
+    aoa.push([
+      N(i+1),p.partNo||'',p.name,p.parent?'Parent':'Child',N(p.qty),p.mat,N(p.thk),N(p.L),N(p.W),
+      F(`H${R2}*I${R2}/1000000`),
+      F(`VLOOKUP(F${R2},Rates!$A$${mtlFirst}:$C$${mtlLast},3,0)`),
+      F(`J${R2}*G${R2}*K${R2}`),
+      F(`L${R2}*E${R2}`),
+      F(`VLOOKUP(F${R2},Rates!$A$${mtlFirst}:$C$${mtlLast},2,0)`),
+      F(`M${R2}*N${R2}*(1+Rates!$B$3/100)`),
+      N(p.cutLen),F(`IF(LEFT(F${R2},2)="SS",Rates!$B$6,Rates!$B$5)`),
+      F(p.proc.laser?`P${R2}*Q${R2}*E${R2}`:'0'),
+      N(p.pierces),F(p.proc.laser?`S${R2}*Rates!$B$4*E${R2}`:'0'),
+      N(p.bends),F(`IF(Rates!$B$2>=100,Rates!$B$10,Rates!$B$9)`),
+      F(p.proc.bend?`U${R2}*V${R2}*E${R2}`:'0'),
+      N(p.weldIn),F(`IF(Rates!$B$2>=100,Rates!$B$12,Rates!$B$11)`),
+      F(p.proc.weld?`X${R2}*Y${R2}*E${R2}`:'0'),
+      F(`J${R2}*2*10.7639`),
+      F(p.proc.pc&&p.pc!=='none'?(p.pc==='sf'?`AA${R2}*Rates!$B$14*E${R2}`:`M${R2}*Rates!$B$13`):'0'),
+      F(`O${R2}+R${R2}+T${R2}+W${R2}+Z${R2}+AB${R2}`)
+    ]);
+  });
+  const last=c.rows.length+1, TR=last+1;
+  aoa.push(['','','','','','','','','','','','',F(`SUM(M2:M${last})`),'',
+    F(`SUM(O2:O${last})`),'','',F(`SUM(R2:R${last})`),'',F(`SUM(T2:T${last})`),'','',
+    F(`SUM(W2:W${last})`),'','',F(`SUM(Z2:Z${last})`),'',F(`SUM(AB2:AB${last})`),F(`SUM(AC2:AC${last})`)]);
+  aoa[TR-1][2]='TOTALS';
+  const wsP=XLSX.utils.aoa_to_sheet(aoa);
+  wsP['!cols']=head.map(h=>({wch:Math.max(10,h.length)}));
+  XLSX.utils.book_append_sheet(wb,wsP,'Parts');
+
+  /* --- Nesting & Weights sheet (formula-driven) --- */
+  const wsNA=[['NESTING, SHEET WEIGHT & WASTAGE (per material/thickness group)'],
+    ['Group','Sheet picked (mm)','Parts qty','In store','Sheets (calc)','Shortage','Sheet area m²','Sheet wt (kg)','Used sheet wt (kg)','Net part wt (kg)','Wastage wt (kg)','Utilisation %']];
+  let nr=2;
+  c.nestGroups.forEach(g=>{
+    const qty=g.items.reduce((a,rw)=>a+rw.p.qty,0);
+    const row=nr+1;
+    // per-sheet fit via formula for the largest part in group (approximation mirrors UI)
+    const big=g.items.slice().sort((a,b)=>b.areaM2-a.areaM2)[0];
+    wsNA.push([`${g.mat} / ${g.thk} mm`,`${g.s.L}×${g.s.W}${g.s.virtual?' (not in store)':''}`,N(qty),N(g.s.virtual?0:g.s.qty),
+      F(`CEILING(C${row}/(INT((${g.s.L}-2*Rates!$B$16+Rates!$B$15)/(${big.p.L}+Rates!$B$15))*INT((${g.s.W}-2*Rates!$B$16+Rates!$B$15)/(${big.p.W}+Rates!$B$15))),1)`),
+      F(`MAX(0,E${row}-D${row})`),
+      F(`${g.s.L}*${g.s.W}/1000000`),
+      F(`G${row}*${g.thk}*${g.den}`),
+      F(`E${row}*H${row}`),
+      N(+g.netWt.toFixed(3)),
+      F(`I${row}-J${row}`),
+      F(`ROUND(${+(g.items.reduce((a,rw)=>a+rw.areaM2*rw.p.qty,0)).toFixed(4)}/(E${row}*G${row})*100,2)`)]);
+    nr++;
+  });
+  const gr=nr+1;
+  wsNA.push(['TOTAL','','','',F(`SUM(E3:E${nr})`),F(`SUM(F3:F${nr})`),'','',F(`SUM(I3:I${nr})`),F(`SUM(J3:J${nr})`),F(`SUM(K3:K${nr})`),'']);
+  const wsN=XLSX.utils.aoa_to_sheet(wsNA);
+  wsN['!cols']=[{wch:18},{wch:20},{wch:10},{wch:9},{wch:12},{wch:9},{wch:12},{wch:12},{wch:15},{wch:15},{wch:14},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,wsN,'Nesting & Weights');
+
+  /* --- Tubes sheet (formula-driven) --- */
+  let tubesTotalRow=null;
+  if(c.tubeRows.length){
+    const th=['Description','Shape','A (mm)','B (mm)','Wall t (mm)','Length (mm)','Qty','Material',
+      'Rate ₹/kg','kg/m','Wt/pc (kg)','Total wt (kg)','Cost ₹'];
+    const ta=[th];
+    c.tubeRows.forEach(({t},i)=>{
+      const R2=i+2;
+      ta.push([t.name,t.shape,N(t.A),N(t.B),N(t.wall),N(t.len),N(t.qty),t.mat,
+        F(`VLOOKUP(H${R2},Rates!$A$${mtlFirst}:$C$${mtlLast},2,0)`),
+        F(`(IF(B${R2}="Round",PI()/4*(C${R2}^2-MAX(0,C${R2}-2*E${R2})^2),C${R2}*IF(B${R2}="Rectangular",D${R2},C${R2})-MAX(0,C${R2}-2*E${R2})*MAX(0,IF(B${R2}="Rectangular",D${R2},C${R2})-2*E${R2})))*VLOOKUP(H${R2},Rates!$A$${mtlFirst}:$C$${mtlLast},3,0)/1000`),
+        F(`J${R2}*F${R2}/1000`),
+        F(`K${R2}*G${R2}`),
+        F(`L${R2}*I${R2}`)]);
+    });
+    tubesTotalRow=c.tubeRows.length+2;
+    ta.push(['TOTAL','','','','','','','','','', '',F(`SUM(L2:L${tubesTotalRow-1})`),F(`SUM(M2:M${tubesTotalRow-1})`)]);
+    const wsT=XLSX.utils.aoa_to_sheet(ta);
+    wsT['!cols']=th.map(h=>({wch:Math.max(10,h.length+2)}));
+    XLSX.utils.book_append_sheet(wb,wsT,'Tubes');
+  }
+
+  /* --- Summary sheet --- */
+  const wsS=XLSX.utils.aoa_to_sheet([
+    ['COST SUMMARY',''],
+    ['Material',F(`Parts!O${TR}`)],['Laser cutting',F(`Parts!R${TR}`)],['Piercing',F(`Parts!T${TR}`)],
+    ['Bending',F(`Parts!W${TR}`)],['Welding',F(`Parts!Z${TR}`)],['Powder coating',F(`Parts!AB${TR}`)],
+    ['Parts subtotal',F(`Parts!AC${TR}`)],
+    ['Tubes & sections',tubesTotalRow?F(`Tubes!M${tubesTotalRow}`):N(0)],
+    ['Assembly',F(`${c.asmQty}*Rates!$B$17`)],
+    ['Accessories',N(c.accTot)],
+    ['GRAND TOTAL',F(`B8+B9+B10+B11`)],
+    [],
+    ['Net component weight (kg)',F(`Parts!M${TR}`)],
+    ['Tubes weight (kg)',tubesTotalRow?F(`Tubes!L${tubesTotalRow}`):N(0)],
+    ['Sheets required',F(`'Nesting & Weights'!E${gr}`)],
+    ['Sheet used weight (kg)',F(`'Nesting & Weights'!I${gr}`)],
+    ['Unutilised wastage weight (kg)',F(`'Nesting & Weights'!K${gr}`)],
+  ]);
+  wsS['!cols']=[{wch:34},{wch:16}];
+  XLSX.utils.book_append_sheet(wb,wsS,'Summary');
+
+  const ref=$('qRef').value||'Quotation';
+  XLSX.writeFile(wb,`MEGAVERKS_${ref.replace(/[^\w-]/g,'_')}_Costing.xlsx`);
+  if(typeof clipReact==='function') clipReact('export');
+}
+/* ================= Number to words (Indian) ================= */
+function inWords(n){
+  n=Math.round(n); if(!n) return 'Zero';
+  const o=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+  const t=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+  const two=x=>x<20?o[x]:t[Math.floor(x/10)]+(x%10?' '+o[x%10]:'');
+  const three=x=>{const h=Math.floor(x/100),r=x%100;return (h?o[h]+' Hundred'+(r?' ':''):'')+(r?two(r):'');};
+  let s='';
+  const cr=Math.floor(n/1e7); n%=1e7; const lk=Math.floor(n/1e5); n%=1e5;
+  const th=Math.floor(n/1000); n%=1000;
+  if(cr)s+=three(cr)+' Crore '; if(lk)s+=three(lk)+' Lakh ';
+  if(th)s+=three(th)+' Thousand '; if(n)s+=three(n);
+  return s.trim();
+}
+
+/* ================= Quotation document (print) ================= */
+function buildQuoteHTML(){
+  const c=CALC; if(!c) return '';
+  const today=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  let rows=c.rows.map((rw,i)=>`<tr><td>${i+1}</td><td>${esc(rw.p.partNo)}</td><td>${esc(rw.p.name)}</td>
+    <td>${rw.p.mat} / ${rw.p.thk} mm</td><td class="num">${rw.p.L}×${rw.p.W}</td>
+    <td class="num">${rw.p.qty}</td><td class="num">${f3(rw.wtTot)}</td><td class="num">${f2(rw.tot)}</td></tr>`).join('');
+  let tubeRowsHtml=c.tubeRows.map(({t,wt,cost},i)=>`<tr><td>${c.rows.length+i+1}</td><td>—</td>
+    <td>${esc(t.name)} — ${t.shape} ${t.shape==='Round'?'⌀'+t.A:t.A+'×'+(t.shape==='Square'?t.A:t.B)}×${t.wall} mm</td>
+    <td>${esc(t.mat)}</td><td class="num">L ${t.len}</td><td class="num">${t.qty}</td><td class="num">${f3(wt)}</td><td class="num">${f2(cost)}</td></tr>`).join('');
+  let accRows=accs.filter(a=>a.name||a.cost).map(a=>`<tr><td colspan="7">${esc(a.name)}</td><td class="num">${f2(a.cost)}</td></tr>`).join('');
+  return `
+  <div class="qhead">
+    <div class="qco"><h1>MEGAVERKS TECHNOLOGIES</h1><p>Sheet Metal Fabrication · Laser Cutting · Bending · Welding · Powder Coating</p></div>
+    <div class="qmeta"><h2>QUOTATION</h2><p>Ref: ${esc($('qRef').value)||'—'}<br>Date: ${today}</p></div>
+  </div>
+  <div class="qto"><b>To,</b><br>${esc($('custCompany').value)||''}<br>
+    ${esc($('custName').value)}${$('custPhone').value?' · '+esc($('custPhone').value):''}<br>
+    <span style="color:#5B6A78">${esc($('custAddr').value)}</span></div>
+  <p class="qintro">Dear Sir/Madam, thank you for your enquiry. Please find our best offer below (Order qty / MOQ considered: <b>${c.moq}</b>):</p>
+  <h3 class="qsub">Part Costing</h3>
+  <table class="qtbl"><tr><th>#</th><th>Part No</th><th>Description</th><th>Mat / Thk</th><th class="num">L×W mm</th><th class="num">Qty</th><th class="num">Wt kg</th><th class="num">Amount ₹</th></tr>
+  ${rows}${tubeRowsHtml}${accRows}
+  <tr class="grand"><td colspan="7">GRAND TOTAL</td><td class="num">${f2(c.grand)}</td></tr></table>
+  <p class="qwords"><b>Amount in words:</b> Rupees ${inWords(c.grand)} Only</p>
+  <h3 class="qsub">Process Cost Breakup</h3>
+  <table class="qtbl"><tr><th>Cost head</th><th class="num">Amount ₹</th></tr>
+    <tr><td>Material</td><td class="num">${f2(c.totMat)}</td></tr>
+    <tr><td>Laser cutting / Punching</td><td class="num">${f2(c.totLas)}</td></tr>
+    <tr><td>Piercing</td><td class="num">${f2(c.totPie)}</td></tr>
+    <tr><td>Bending</td><td class="num">${f2(c.totBnd)}</td></tr>
+    <tr><td>Welding</td><td class="num">${f2(c.totWld)}</td></tr>
+    <tr><td>Powder coating</td><td class="num">${f2(c.totPC)}</td></tr>
+    ${c.tubeTot?`<tr><td>Tubes &amp; sections</td><td class="num">${f2(c.tubeTot)}</td></tr>`:''}
+    ${c.asmCost?`<tr><td>Assembly (${c.asmQty} × ₹${f2(c.rates.asm)})</td><td class="num">${f2(c.asmCost)}</td></tr>`:''}
+    ${c.accTot?`<tr><td>Accessories</td><td class="num">${f2(c.accTot)}</td></tr>`:''}
+    <tr class="grand"><td>GRAND TOTAL</td><td class="num">${f2(c.grand)}</td></tr></table>
+  <h3 class="qsub">Material &amp; Wastage Summary</h3>
+  <table class="qtbl"><tr><th>Raw sheets required</th><th class="num">Sheet weight (kg)</th><th class="num">Net parts weight (kg)</th><th class="num">Unutilised wastage (kg)</th></tr>
+  <tr><td class="num">${c.totSheets} × (${esc(c.sheetDesc)} mm)</td><td class="num">${f3(c.totSheetWt)}</td><td class="num">${f3(c.totNetWt)}</td><td class="num">${f3(c.wasteWt)}</td></tr></table>
+  <h3 class="qsub">Terms &amp; Conditions</h3>
+  <ol class="qterms">
+    <li>Prices are ex-works; GST extra as applicable.</li>
+    <li>Validity: 15 days from quotation date. Material rates subject to market revision thereafter.</li>
+    <li>Delivery: as mutually agreed after receipt of confirmed PO.</li>
+    <li>Payment: as per agreed terms.</li>
+  </ol>
+  <div class="qsign"><div><div class="sig"></div><b>For MEGAVERKS TECHNOLOGIES</b><br><span style="font-size:11px;color:#5B6A78">Authorised Signatory</span></div></div>`;
+}
+function printQuote(){
+  if(!CALC||(!CALC.rows.length&&!CALC.tubeRows.length)){alert('Add at least one part or tube first.');return;}
+  $('quoteDoc').innerHTML=buildQuoteHTML();
+  if(typeof clipReact==='function') clipReact('quote');
+  document.body.classList.add('qmode');
+  setTimeout(()=>{window.print();document.body.classList.remove('qmode');},100);
+}
+
+/* ================= PDF export ================= */
+function exportPDF(){
+  if(!CALC||(!CALC.rows.length&&!CALC.tubeRows.length)){alert('Add at least one part or tube first.');return;}
+  const c=CALC, {jsPDF}=window.jspdf;
+  const doc=new jsPDF({unit:'mm',format:'a4'});
+  doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(51,70,90);
+  doc.text('MEGAVERKS TECHNOLOGIES',14,16);
+  doc.setFontSize(10); doc.setTextColor(224,123,18);
+  doc.text('QUOTATION — '+($('qRef').value||'Draft'),14,22);
+  doc.setTextColor(60); doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  doc.text(`Date: ${new Date().toLocaleDateString('en-IN')}   MOQ: ${c.moq}`,14,27);
+  doc.text(`To: ${$('custCompany').value||''} ${$('custName').value}`.trim(),14,32);
+  doc.autoTable({startY:36,head:[['#','Part','Mat/t','L×W','Qty','Wt kg','Amount ₹']],
+    body:c.rows.map((rw,i)=>[i+1,(rw.p.partNo?rw.p.partNo+' — ':'')+rw.p.name,`${rw.p.mat}/${rw.p.thk}`,`${rw.p.L}×${rw.p.W}`,rw.p.qty,f3(rw.wtTot),f2(rw.tot)])
+      .concat(c.tubeRows.map(({t,wt,cost},i)=>[c.rows.length+i+1,t.name+` (${t.shape} ${t.A}×${t.shape==='Square'?t.A:t.B}×${t.wall})`,t.mat,`L ${t.len}`,t.qty,f3(wt),f2(cost)])),
+    foot:[['','','','','','GRAND TOTAL',f2(c.grand)]],
+    styles:{fontSize:8},headStyles:{fillColor:[51,70,90]},footStyles:{fillColor:[224,123,18]}});
+  let y=doc.lastAutoTable.finalY+8;
+  doc.setFont('helvetica','bold'); doc.text('Process Cost Breakup',14,y);
+  doc.autoTable({startY:y+2,head:[['Cost head','Amount ₹']],
+    body:[['Material',f2(c.totMat)],['Laser cutting / Punching',f2(c.totLas)],['Piercing',f2(c.totPie)],
+      ['Bending',f2(c.totBnd)],['Welding',f2(c.totWld)],['Powder coating',f2(c.totPC)],
+      ['Tubes & sections',f2(c.tubeTot)],[`Assembly (${c.asmQty} × ₹${f2(c.rates.asm)})`,f2(c.asmCost)],
+      ['Accessories',f2(c.accTot)],['GRAND TOTAL',f2(c.grand)]],
+    styles:{fontSize:8},headStyles:{fillColor:[51,70,90]}});
+  y=doc.lastAutoTable.finalY+8;
+  doc.setFont('helvetica','bold'); doc.text('Material & Wastage',14,y);
+  doc.autoTable({startY:y+2,head:[['Sheets','Sheet wt kg','Net parts kg','Wastage kg']],
+    body:[[`${c.totSheets} × ${c.sheetDesc}`,f3(c.totSheetWt),f3(c.totNetWt),f3(c.wasteWt)]],
+    styles:{fontSize:8},headStyles:{fillColor:[51,70,90]}});
+  y=doc.lastAutoTable.finalY+8;
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.text(`Amount in words: Rupees ${inWords(c.grand)} Only`,14,y);
+  doc.text('Terms: Ex-works, GST extra. Validity 15 days.',14,y+5);
+  doc.save(`MEGAVERKS_${($('qRef').value||'Quotation').replace(/[^\w-]/g,'_')}.pdf`);
+  if(typeof clipCelebrate==='function') clipCelebrate();
+}
+
+/* ================= Raw Material Usage & Analysis report (PDF) ================= */
+function svgToPng(svg,scale){
+  return new Promise(res=>{
+    const xml=new XMLSerializer().serializeToString(svg);
+    const img=new Image();
+    img.onload=()=>{
+      const cv=document.createElement('canvas');
+      cv.width=img.width*scale; cv.height=img.height*scale;
+      const ctx=cv.getContext('2d');
+      ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height);
+      ctx.drawImage(img,0,0,cv.width,cv.height);
+      res({data:cv.toDataURL('image/png'),w:cv.width,h:cv.height});
+    };
+    img.onerror=()=>res(null);
+    img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(xml);
+  });
+}
+async function rmReportPDF(){
+  if(!CALC||!CALC.nestGroups.length){alert('Add at least one part first.');return;}
+  const c=CALC, {jsPDF}=window.jspdf;
+  const doc=new jsPDF({unit:'mm',format:'a4'});
+  doc.setFont('helvetica','bold'); doc.setFontSize(15); doc.setTextColor(51,70,90);
+  doc.text('MEGAVERKS TECHNOLOGIES — Raw Material Usage & Analysis',14,15);
+  doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(60);
+  doc.text(`Ref: ${$('qRef').value||'Draft'}   Date: ${new Date().toLocaleDateString('en-IN')}   MOQ: ${c.moq}`,14,21);
+  doc.autoTable({startY:25,
+    head:[['Group (Mat/Thk)','Sheet mm','In stock','Used','Extra','Sheet wt','Used wt','Net wt','Waste wt','Use %','Waste %']],
+    body:c.nestGroups.map(g=>{
+      const stock=g.s.virtual?0:g.s.qty, extra=Math.max(0,g.sheets-stock);
+      return [g.mat+' / '+g.thk+' mm',`${g.s.L}×${g.s.W}${g.s.virtual?' *':''}`,
+        g.s.virtual?'—':stock,g.sheets,extra||'—',f3(g.sheetWt),f3(g.usedWt),f3(g.netWt),f3(g.wasteWt),
+        f2(g.util)+'%',(g.usedWt?f2(g.wasteWt/g.usedWt*100):'0.00')+'%'];
+    }),
+    foot:[['TOTAL','','',String(c.totSheets),
+      String(c.nestGroups.reduce((a,g)=>a+Math.max(0,g.sheets-(g.s.virtual?0:g.s.qty)),0)||'—'),
+      '',f3(c.totSheetWt),f3(c.totNetWt),f3(c.wasteWt),
+      (c.totSheetWt?f2(c.totNetWt/c.totSheetWt*100):'0')+'%',
+      (c.totSheetWt?f2(c.wasteWt/c.totSheetWt*100):'0')+'%']],
+    styles:{fontSize:7.2},headStyles:{fillColor:[51,70,90]},footStyles:{fillColor:[230,235,240],textColor:[51,70,90],fontStyle:'bold'}});
+  let y=doc.lastAutoTable.finalY+8;
+  const svgs=[...document.querySelectorAll('#rmGraphs .rm-svg')];
+  const caps=[...document.querySelectorAll('#rmGraphs .rm-card > div')].map(d=>d.innerText.replace(/\s+/g,' ').trim());
+  for(let i=0;i<svgs.length;i++){
+    const png=await svgToPng(svgs[i],2);
+    if(!png) continue;
+    const maxW=180, maxH=110;
+    const k=Math.min(maxW/png.w,maxH/png.h)*1;
+    const w=png.w*k, h=png.h*k;
+    if(y+h+14>285){doc.addPage();y=14;}
+    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(51,70,90);
+    doc.text(caps[i]||('Layout '+(i+1)),14,y);
+    doc.addImage(png.data,'PNG',14,y+2,w,h);
+    y+=h+10;
+  }
+  if(!svgs.length){doc.setFontSize(9);doc.text('No graphical layouts (parts oversize or missing dimensions).',14,y);}
+  doc.save(`MEGAVERKS_${($('qRef').value||'Quotation').replace(/[^\w-]/g,'_')}_RawMaterial_Report.pdf`);
+  if(typeof clipCelebrate==='function') clipCelebrate();
+}
+
+/* ================= Interactive nesting board (drag & drop, true-shape) ================= */
+const NX={placed:[], sel:-1};   // placed: {partId,x,y,rot} in mm (screen coords, y down)
+function nxSheetDef(){
+  const key=$('nxSheetSel').value;
+  const s=INV.find(x=>nxKey(x)===key);
+  return s?{L:s.L,W:s.W,label:`${s.mat} ${s.thk}mm · ${s.L}×${s.W}`}:{L:2500,W:1250,label:'Default 2500×1250'};
+}
+function nxGap(){ return Math.max(0,parseFloat($('nxGap').value)||0); }
+/* part geometry: contours (mm, y-down, origin 0,0) rotated by deg and renormalized */
+function partGeom(p,deg){
+  deg=((deg%360)+360)%360;
+  let cs;
+  if(p.contours&&p.contours.length) cs=p.contours.map(c=>({closed:c.closed,pts:c.pts.map(q=>[q[0],q[1]])}));
+  else cs=[{closed:true,pts:[[0,0],[p.L,0],[p.L,p.W],[0,p.W]]}];
+  if(deg){
+    const a=deg*Math.PI/180, co=Math.cos(a), si=Math.sin(a);
+    cs=cs.map(c=>({closed:c.closed,pts:c.pts.map(q=>[q[0]*co-q[1]*si, q[0]*si+q[1]*co])}));
+  }
+  let minX=1e18,minY=1e18,maxX=-1e18,maxY=-1e18;
+  cs.forEach(c=>c.pts.forEach(q=>{minX=Math.min(minX,q[0]);minY=Math.min(minY,q[1]);maxX=Math.max(maxX,q[0]);maxY=Math.max(maxY,q[1]);}));
+  cs.forEach(c=>c.pts=c.pts.map(q=>[q[0]-minX,q[1]-minY]));
+  return {cs, w:maxX-minX, h:maxY-minY};
+}
+function geomArea(p){
+  const g=partGeom(p,0); let a=0;
+  g.cs.forEach(c=>{ if(!c.closed) return;
+    let s=0; for(let k=0;k<c.pts.length;k++){ const u=c.pts[k],v=c.pts[(k+1)%c.pts.length]; s+=u[0]*v[1]-v[0]*u[1]; }
+    a+=s/2; });
+  return Math.abs(a)||(p.L*p.W);
+}
+function nxPlacedCount(id){ return NX.placed.filter(q=>q.partId===id).length; }
+/* collision: AABB inflated by half the spacing on every side */
+function nxFits(w,h,x,y,ignore){
+  const sh=nxSheetDef(), g=nxGap()/2;
+  if(x<0||y<0||x+w>sh.L+0.01||y+h>sh.W+0.01) return false;
+  for(let k=0;k<NX.placed.length;k++){
+    if(k===ignore) continue;
+    const q=NX.placed[k], p=parts.find(pp=>pp.id===q.partId); if(!p) continue;
+    const gg=partGeom(p,q.rot);
+    if(x-g < q.x+gg.w && x+w+g > q.x && y-g < q.y+gg.h && y+h+g > q.y) return false;
   }
   return true;
 }
-function nxFillSheets(){
-  const sel=$('nxSheetSel'); if(!sel) return;
-  const cur=sel.value;
-  sel.innerHTML=INV.map(s=>`<option value="${esc(nxKey(s))}" ${nxKey(s)===cur?'selected':''}>${esc(s.mat)} ${s.thk}mm · ${s.L}×${s.W} (${s.qty} in stock)</option>`).join('');
-  if(![...sel.options].some(o=>o.value===cur)&&sel.options.length) sel.selectedIndex=0;
-}
 function nxRenderPalette(){
-  const el=$('nxPalette'); if(!el) return;
-  el.innerHTML=parts.map((p,i)=>{
-    const g=partGeom(p,0), sc=Math.min(1,104/Math.max(g.L,1)), sh=Math.min(1,60/Math.max(g.W,1)), s=Math.min(sc,sh);
-    const polys=g.contours.filter(ct=>ct.closed).map(ct=>
-      `<polygon points="${ct.pts.map(q=>(q.x*s).toFixed(1)+','+(q.y*s).toFixed(1)).join(' ')}"/>`).join('');
-    return `<div class="nx-chip" data-idx="${i}">
-      <svg width="${Math.max(20,g.L*s)}" height="${Math.max(14,g.W*s)}" viewBox="0 0 ${g.L*s} ${g.W*s}">${polys||`<rect width="${g.L*s}" height="${g.W*s}"/>`}</svg>
-      <div class="nm">${esc(p.partNo||p.name)}</div><div class="qq">×${p.qty} · ${f2(g.L)}×${f2(g.W)}</div></div>`;
-  }).join('')||'<span class="hint">Add components first.</span>';
-  [...el.children].forEach(ch=>{
-    ch.addEventListener('pointerdown',e=>{ if(ch.dataset&&ch.dataset.idx!=null) nxDragStart(e,{part:parts[+ch.dataset.idx],rot:0},true); });
-  });
+  const pal=$('nxPalette'); if(!pal) return;
+  pal.innerHTML=parts.map(p=>{
+    const left=p.qty-nxPlacedCount(p.id);
+    const g=partGeom(p,0);
+    const sc=Math.min(108/(g.w||1), 64/(g.h||1));
+    const shapes=g.cs.map(c=>{
+      const pts=c.pts.map(q=>(q[0]*sc).toFixed(1)+','+(q[1]*sc).toFixed(1)).join(' ');
+      return c.closed?`<polygon points="${pts}" style="fill:#3D7BE0;fill-opacity:${c===g.cs[0]?'0.75':'0.15'};stroke:#2b5aa8;stroke-width:1"/>`
+                     :`<polyline points="${pts}" fill="none" stroke="#2b5aa8"/>`;
+    }).join('');
+    return `<div class="nx-chip" data-pid="${p.id}" style="${left<=0?'opacity:.35':''}">
+      <svg width="110" height="66" viewBox="0 0 ${g.w*sc} ${g.h*sc}">${shapes}</svg>
+      <div class="nm">${esc(p.name||p.partNo||'Part')}</div>
+      <div class="qq">${g.w.toFixed(0)}×${g.h.toFixed(0)} mm · ${Math.max(0,left)} left</div>
+    </div>`;
+  }).join('')||'<p class="hint" style="padding:10px">No components yet — add parts or upload DXF files above.</p>';
+  pal.querySelectorAll('.nx-chip').forEach(ch=>ch.addEventListener('pointerdown',e=>nxDragStart(e,+ch.dataset.pid,-1)));
 }
 function nxRender(){
-  const svg=$('nxSheet'), s=nxSheetDef();
-  if(!svg) return;
-  if(!s){ svg.innerHTML='<text x="20" y="40" font-size="14" fill="#98A5B1">Add a sheet in the Raw Material Store first.</text>'; $('nxStatus').textContent=''; return; }
-  const scale=Math.min(1,920/s.L);
-  svg.setAttribute('viewBox',`0 0 ${s.L*scale} ${s.W*scale}`);
-  svg.style.width=(s.L*scale)+'px';
-  let h=`<rect x="0" y="0" width="${s.L*scale}" height="${s.W*scale}" fill="#E8ECF0" stroke="#98A5B1"/>`;
-  NX.placed.forEach((q,qi)=>{
-    const g=partGeom(q.part,q.rot);
-    const polys=g.contours.filter(ct=>ct.closed).map((ct,ci)=>
-      `<polygon class="${ci===0?'':'hole'}" points="${ct.pts.map(p=>((q.x+p.x)*scale).toFixed(2)+','+((q.y+p.y)*scale).toFixed(2)).join(' ')}"/>`).join('');
-    h+=`<g class="placed ${qi===NX.sel?'sel':''}" data-qi="${qi}">${polys}</g>`;
+  nxRenderPalette();
+  const sh=nxSheetDef(), svg=$('nxSheet');
+  const sc=Math.min(1, 900/sh.L);
+  svg.setAttribute('viewBox',`0 0 ${sh.L*sc} ${sh.W*sc}`);
+  svg.setAttribute('width', sh.L*sc); svg.setAttribute('height', sh.W*sc);
+  let inner=`<rect x="0" y="0" width="${sh.L*sc}" height="${sh.W*sc}" fill="#E8ECF0" stroke="#98A5B1" stroke-width="1"/>`;
+  NX.placed.forEach((q,idx)=>{
+    const p=parts.find(pp=>pp.id===q.partId); if(!p) return;
+    const g=partGeom(p,q.rot);
+    const shapes=g.cs.map((c,ci)=>{
+      const pts=c.pts.map(u=>((q.x+u[0])*sc).toFixed(2)+','+((q.y+u[1])*sc).toFixed(2)).join(' ');
+      const isHole=ci>0&&c.closed;
+      return c.closed?`<polygon class="${isHole?'hole':''}" points="${pts}"/>`:`<polyline points="${pts}" fill="none" stroke="#2b5aa8" stroke-width="${0.6}"/>`;
+    }).join('');
+    inner+=`<g class="placed ${idx===NX.sel?'sel':''}" data-idx="${idx}">${shapes}
+      <text x="${(q.x+g.w/2)*sc}" y="${(q.y+g.h/2)*sc}" text-anchor="middle" font-size="${Math.max(8,10*sc+6)}" fill="#fff" style="pointer-events:none">${idx+1}</text></g>`;
   });
-  h+='<g id="nxPv"></g>';
-  svg.innerHTML=h;
-  [...svg.querySelectorAll('.placed')].forEach(g=>{
-    g.addEventListener('pointerdown',e=>{ NX.sel=+g.dataset.qi; nxRender(); nxDragStart(e,NX.placed[+g.dataset.qi],false); e.stopPropagation(); });
+  svg.innerHTML=inner;
+  svg.querySelectorAll('.placed').forEach(el=>{
+    el.addEventListener('pointerdown',e=>{ NX.sel=+el.dataset.idx; nxDragStart(e,NX.placed[NX.sel].partId,NX.sel); });
   });
-  svg.addEventListener('pointerdown',e=>{ if(e.target===svg||e.target.tagName==='rect'&&!e.target.classList.contains('rpart')){ NX.sel=-1; nxRender(); } });
   // status
-  let used=0; NX.placed.forEach(q=>used+=geomArea(partGeom(q.part,q.rot)));
-  const sheetA=s.L*s.W;
-  $('nxStatus').innerHTML=`Sheet <b>${s.L}×${s.W} ${esc(s.mat)} ${s.thk}mm</b> · placed <b>${NX.placed.length}</b> · usage <b>${f2(used/sheetA*100)}%</b> · spacing <b>${nxGap()}mm</b>`;
+  let used=0; NX.placed.forEach(q=>{const p=parts.find(pp=>pp.id===q.partId); if(p) used+=geomArea(p);});
+  const util=sh.L*sh.W?used/(sh.L*sh.W)*100:0;
+  $('nxStatus').innerHTML=`Sheet: <b>${esc(sh.label)}</b> · placed <b>${NX.placed.length}</b> pcs · utilisation <b>${util.toFixed(1)}%</b> · spacing <b>${nxGap()} mm</b>`;
 }
-function nxReset(){ NX.placed=[]; NX.sel=-1; nxRender(); nxRenderPalette(); }
-function nxClear(){ NX.placed=[]; NX.sel=-1; nxRender(); }
-function nxSync(){ nxRenderPalette(); nxRender(); }
+function nxReset(){ NX.placed=[]; NX.sel=-1; nxRender(); }
+function nxClear(){ nxReset(); }
+function nxSync(){ if($('nxPalette')) nxRender(); }
+/* sheet dropdown options from store */
+const nxKey=s=>s?s.mat+'|'+s.thk+'|'+s.L+'|'+s.W:'-';
+function nxFillSheets(){
+  const sel=$('nxSheetSel'); if(!sel) return;
+  const cur=sel.value;   // key-based: survives add/delete of store rows
+  sel.innerHTML=INV.map(s=>`<option value="${nxKey(s)}">${esc(s.mat)} ${s.thk}mm · ${s.L}×${s.W} (stock ${s.qty})</option>`).join('')||'<option value="-1">Default 2500×1250</option>';
+  if(cur&&[...sel.options].some(o=>o.value===cur)) sel.value=cur;
+}
+/* ---- drag & drop ---- */
 let nxDrag=null;
-function nxDragStart(e,q,isNew){
-  const svg=$('nxSheet'), s=nxSheetDef(); if(!svg||!s) return;
-  const scale=Math.min(1,920/s.L);
-  nxDrag={q,isNew,scale,svg};
-  const ghost=document.createElement('div'); ghost.className='nx-ghost';
-  ghost.textContent=(q.part.partNo||q.part.name)+' · '+(q.rot||0)+'°';
-  document.body.appendChild(ghost); nxDrag.ghost=ghost;
-  const move=ev=>nxDragMove(ev), up=ev=>{ nxDragEnd(ev); removeEventListener('pointermove',move); removeEventListener('pointerup',up); };
-  addEventListener('pointermove',move); addEventListener('pointerup',up);
+function nxDragStart(e,partId,idx){
+  e.preventDefault();
+  const p=parts.find(pp=>pp.id===partId); if(!p) return;
+  const svg=$('nxSheet'), rect=svg.getBoundingClientRect();
+  const sh=nxSheetDef(), sc=rect.width/sh.L;
+  const g=partGeom(p, idx>-1?NX.placed[idx].rot:0);
+  let startX=0,startY=0;
+  if(idx>-1){ startX=NX.placed[idx].x; startY=NX.placed[idx].y; }
+  else { if(nxPlacedCount(partId)>=p.qty) return; }
+  nxDrag={partId,idx,g,offX:(e.clientX-rect.left)/sc-(idx>-1?startX:g.w/2),offY:(e.clientY-rect.top)/sc-(idx>-1?startY:g.h/2),startX,startY};
+  const ghost=document.createElement('div'); ghost.className='nx-ghost'; ghost.id='nxGhost';
+  ghost.textContent=(p.name||'Part')+' — drop on sheet';
+  document.body.appendChild(ghost);
+  window.addEventListener('pointermove',nxDragMove);
+  window.addEventListener('pointerup',nxDragEnd,{once:true});
   nxDragMove(e);
 }
 function nxDragMove(e){
   if(!nxDrag) return;
-  const {svg,scale,ghost}=nxDrag;
-  const r=svg.getBoundingClientRect();
-  const g=partGeom(nxDrag.q.part,nxDrag.q.rot);
-  const x=(e.clientX-r.left)/scale-g.L/2, y=(e.clientY-r.top)/scale-g.W/2;
+  const gh=$('nxGhost'); if(gh){gh.style.left=(e.clientX+12)+'px';gh.style.top=(e.clientY+12)+'px';}
+  const svg=$('nxSheet'), rect=svg.getBoundingClientRect();
+  const sh=nxSheetDef(), sc=rect.width/sh.L;
+  const x=(e.clientX-rect.left)/sc-nxDrag.offX, y=(e.clientY-rect.top)/sc-nxDrag.offY;
   nxDrag.x=x; nxDrag.y=y;
-  ghost.style.left=(e.clientX+14)+'px'; ghost.style.top=(e.clientY+14)+'px';
-  const ok=nxFits(g,x,y,nxDrag.isNew?null:nxDrag.q);
-  ghost.style.borderColor=ok?'var(--ok)':'var(--danger)';
-  const pv=svg.querySelector('#nxPv');
-  if(pv){
-    const c0=g.contours[0];
-    pv.innerHTML=`<polygon points="${c0.pts.map(p=>((x+p.x)*scale).toFixed(2)+','+((y+p.y)*scale).toFixed(2)).join(' ')}"
-      fill="${ok?'#1E7F4F':'#C0392B'}" fill-opacity=".35" stroke="${ok?'#1E7F4F':'#C0392B'}" stroke-dasharray="3 2"/>`;
-  }
+  const ok=nxFits(nxDrag.g.w,nxDrag.g.h,x,y,nxDrag.idx);
+  if(gh) gh.style.borderColor=ok?'var(--ok)':'var(--danger)';
+  // live preview
+  const g=nxDrag.g;
+  const pts=g.cs[0].pts.map(u=>((x+u[0])*sc).toFixed(1)+','+((y+u[1])*sc).toFixed(1)).join(' ');
+  let pv=svg.querySelector('#nxPv');
+  if(!pv){ pv=document.createElementNS('http://www.w3.org/2000/svg','polygon'); pv.id='nxPv'; svg.appendChild(pv); }
+  pv.setAttribute('points',pts);
+  pv.setAttribute('style',`fill:${ok?'#1E7F4F':'#E04848'};fill-opacity:.35;stroke:${ok?'#1E7F4F':'#E04848'};stroke-width:1;stroke-dasharray:4 2`);
 }
-function nxDragEnd(e){
+function nxDragEnd(){
+  const gh=$('nxGhost'); if(gh) gh.remove();
+  const pv=$('nxSheet').querySelector('#nxPv'); if(pv) pv.remove();
+  window.removeEventListener('pointermove',nxDragMove);
   if(!nxDrag) return;
-  const {q,isNew}=nxDrag, g=partGeom(q.part,q.rot);
-  const x=nxDrag.x??0, y=nxDrag.y??0;
-  if(nxFits(g,x,y,isNew?null:q)){
-    if(isNew) NX.placed.push({part:q.part,rot:q.rot,x,y});
-    else{ q.x=x; q.y=y; }
-  }else{ nxFlash(); }
-  nxDrag.ghost.remove(); nxDrag=null; nxRender();
+  const {partId,idx,x,y,g}=nxDrag; nxDrag=null;
+  if(x===undefined||!nxFits(g.w,g.h,x,y,idx)){
+    if(idx===undefined){} else nxRender();   // failed drop: leave as-is / revert
+    if(x!==undefined&&!nxFits(g.w,g.h,x,y,idx)) nxFlash();
+    nxRender(); return;
+  }
+  if(idx>-1){ NX.placed[idx].x=x; NX.placed[idx].y=y; }
+  else NX.placed.push({partId,x,y,rot:0});
+  nxRender();
 }
 function nxFlash(){
-  const svg=$('nxSheet'); svg.style.outline='3px solid var(--danger)';
-  setTimeout(()=>svg.style.outline='',350);
+  const b=$('nxStatus'); b.innerHTML='<b style="color:var(--danger)">Does not fit there (spacing '+nxGap()+' mm enforced) — try another spot or rotate.</b>';
+  setTimeout(nxRender,1600);
 }
 function nxRotateSel(){
-  if(NX.sel<0) return;
-  const q=NX.placed[NX.sel], step=+$('nxRot').value||90;
-  const nr=(q.rot+step)%360;
-  const g=partGeom(q.part,nr);
-  if(nxFits(g,q.x,q.y,q)) q.rot=nr; else nxFlash();
-  nxRender();
-}
-function nxRemoveSel(){ if(NX.sel<0) return; NX.placed.splice(NX.sel,1); NX.sel=-1; nxRender(); }
-function nxAuto(){
-  const s=nxSheetDef(); if(!s) return;
-  NX.placed=[]; NX.sel=-1;
-  const step=+$('nxRot').value||90;
-  const rots=[...new Set([0,90,step])];
-  const order=parts.flatMap(p=>Array.from({length:p.qty},()=>p)).sort((a,b)=>b.L*b.W-a.L*a.W);
-  let cx=nxGap(), cy=nxGap(), rowH=0;
-  for(const p of order){
-    let placedOk=false;
-    for(const rot of rots){
-      const g=partGeom(p,rot);
-      if(cx+g.L>s.L-nxGap()+1e-6){ cx=nxGap(); cy+=rowH+nxGap(); rowH=0; }
-      if(cy+g.W>s.W-nxGap()+1e-6) continue;
-      if(nxFits(g,cx,cy,null)){ NX.placed.push({part:p,rot,x:cx,y:cy}); cx+=g.L+nxGap(); rowH=Math.max(rowH,g.W); placedOk=true; break; }
+  if(NX.sel<0||!NX.placed[NX.sel]) return;
+  const q=NX.placed[NX.sel], p=parts.find(pp=>pp.id===q.partId); if(!p) return;
+  const step=parseFloat($('nxRot').value)||90;
+  const old=q.rot; q.rot=(q.rot+step)%360;
+  const g=partGeom(p,q.rot);
+  if(!nxFits(g.w,g.h,q.x,q.y,NX.sel)){
+    // try nudging to nearest free spot around current pos
+    let placed=false;
+    for(const d of [0,5,10,20,40,80]){
+      for(const [dx,dy] of [[d,0],[-d,0],[0,d],[0,-d],[d,d],[-d,-d]]){
+        if(nxFits(g.w,g.h,q.x+dx,q.y+dy,NX.sel)){ q.x+=dx; q.y+=dy; placed=true; break; }
+      }
+      if(placed) break;
     }
+    if(!placed){ q.rot=old; nxFlash(); return; }
   }
   nxRender();
 }
+function nxRemoveSel(){
+  if(NX.sel<0) return;
+  NX.placed.splice(NX.sel,1); NX.sel=-1; nxRender();
+}
+/* ---- auto nest: shelf packing with rotation choice ---- */
+function nxAuto(){
+  const sh=nxSheetDef(), gap=nxGap(), step=parseFloat($('nxRot').value)||90;
+  const rots=[...new Set([0,90,step])].filter(r=>r>=0);
+  const todo=[];
+  parts.forEach(p=>{ for(let k=nxPlacedCount(p.id);k<p.qty;k++) todo.push(p); });
+  todo.sort((a,b)=>Math.max(b.L,b.W)-Math.max(a.L,a.W));
+  let x=gap, y=gap, rowH=0, failed=0;
+  for(const p of todo){
+    let done=false;
+    // try orientations, prefer best fit (least width leftover)
+    const cand=rots.map(r=>({r,g:partGeom(p,r)})).filter(c=>c.g.w<=sh.L&&c.g.h<=sh.W);
+    for(const c of cand){
+      if(x+c.g.w<=sh.L-gap+0.01 && nxFits(c.g.w,c.g.h,x,y,-1)){
+        NX.placed.push({partId:p.id,x,y,rot:c.r});
+        x+=c.g.w+gap; rowH=Math.max(rowH,c.g.h); done=true; break;
+      }
+    }
+    if(!done){ // new row
+      y+=rowH+gap; x=gap; rowH=0;
+      for(const c of cand){
+        if(x+c.g.w<=sh.L-gap+0.01 && nxFits(c.g.w,c.g.h,x,y,-1)){
+          NX.placed.push({partId:p.id,x,y,rot:c.r});
+          x+=c.g.w+gap; rowH=Math.max(rowH,c.g.h); done=true; break;
+        }
+      }
+    }
+    if(!done) failed++;
+  }
+  NX.sel=-1; nxRender();
+  if(failed) $('nxStatus').innerHTML+=` · <b style="color:var(--danger)">${failed} pc(s) didn't fit — add/switch sheet</b>`;
+}
+/* ---- download nested layout ---- */
 function nxBuildDXF(){
-  const s=nxSheetDef(); if(!s||!NX.placed.length) return null;
-  let o='0\nSECTION\n2\nENTITIES\n';
-  o+='0\nLWPOLYLINE\n90\n4\n70\n1\n10\n0\n20\n0\n10\n'+s.L+'\n20\n0\n10\n'+s.L+'\n20\n'+s.W+'\n10\n0\n20\n'+s.W+'\n';
+  const sh=nxSheetDef();
+  let dxf='0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n';
+  const poly=(pts,closed)=>{
+    dxf+='0\nLWPOLYLINE\n8\n0\n90\n'+pts.length+'\n70\n'+(closed?1:0)+'\n';
+    pts.forEach(u=>{ dxf+='10\n'+u[0].toFixed(3)+'\n20\n'+u[1].toFixed(3)+'\n'; });
+  };
+  poly([[0,0],[sh.L,0],[sh.L,sh.W],[0,sh.W]],true);
   NX.placed.forEach(q=>{
-    const g=partGeom(q.part,q.rot);
-    g.contours.forEach(ct=>{
-      if(!ct.closed||ct.pts.length<2) return;
-      o+='0\nLWPOLYLINE\n90\n'+ct.pts.length+'\n70\n1\n';
-      ct.pts.forEach(p=>{ o+='10\n'+(q.x+p.x).toFixed(3)+'\n20\n'+(s.W-(q.y+p.y)).toFixed(3)+'\n'; });
-    });
+    const p=parts.find(pp=>pp.id===q.partId); if(!p) return;
+    const g=partGeom(p,q.rot);
+    g.cs.forEach(c=>poly(c.pts.map(u=>[q.x+u[0], sh.W-(q.y+u[1])]),c.closed));
   });
-  return o+'0\nENDSEC\n0\nEOF\n';
+  dxf+='0\nENDSEC\n0\nEOF';
+  return dxf;
 }
 function nxDownloadDXF(){
-  const d=nxBuildDXF(); if(!d){ alert('Place some parts on the sheet first.'); return; }
+  if(!NX.placed.length){alert('Place parts on the sheet first.');return;}
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([d],{type:'application/dxf'}));
-  a.download='nested_layout.dxf'; a.click(); URL.revokeObjectURL(a.href);
+  a.href=URL.createObjectURL(new Blob([nxBuildDXF()],{type:'application/dxf'}));
+  a.download=`MEGAVERKS_${($('qRef').value||'nest').replace(/[^\w-]/g,'_')}_nested.dxf`;
+  a.click();
 }
 function nxDownloadPDF(){
-  const s=nxSheetDef(); if(!s||!NX.placed.length){ alert('Place some parts on the sheet first.'); return; }
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:s.L>=s.W?'landscape':'portrait',unit:'mm',format:'a4'});
-  const pw=doc.internal.pageSize.getWidth(), ph=doc.internal.pageSize.getHeight();
-  const sc=Math.min((pw-24)/s.L,(ph-34)/s.W), ox=(pw-s.L*sc)/2, oy=22;
-  doc.setFontSize(13); doc.text('MEGAVERKS — Nested Sheet Layout',10,12);
-  doc.setFontSize(9); doc.text(`Sheet ${s.L}×${s.W} ${s.mat} ${s.thk}mm · spacing ${nxGap()}mm · ${NX.placed.length} parts · `+new Date().toLocaleDateString(),10,17);
-  doc.setDrawColor(150); doc.rect(ox,oy,s.L*sc,s.W*sc);
-  NX.placed.forEach(q=>{
-    const g=partGeom(q.part,q.rot);
-    g.contours.forEach(ct=>{
-      if(!ct.closed) return;
-      for(let i=0;i<ct.pts.length;i++){
-        const a=ct.pts[i], b=ct.pts[(i+1)%ct.pts.length];
-        doc.line(ox+(q.x+a.x)*sc, oy+(q.y+a.y)*sc, ox+(q.x+b.x)*sc, oy+(q.y+b.y)*sc);
-      }
+  if(!NX.placed.length){alert('Place parts on the sheet first.');return;}
+  const sh=nxSheetDef(), {jsPDF}=window.jspdf;
+  const landscape=sh.L>=sh.W;
+  const doc=new jsPDF({unit:'mm',format:'a4',orientation:landscape?'l':'p'});
+  const pw=landscape?297:210, ph=landscape?210:297, m=12;
+  const sc=Math.min((pw-2*m)/sh.L,(ph-2*m-14)/sh.W);
+  const ox=m, oy=m+10;
+  doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(51,70,90);
+  doc.text(`MEGAVERKS — Nested layout · ${sh.label} · spacing ${nxGap()} mm`,m,m+4);
+  doc.setDrawColor(120); doc.setLineWidth(0.4);
+  doc.rect(ox,oy,sh.L*sc,sh.W*sc);
+  NX.placed.forEach((q,idx)=>{
+    const p=parts.find(pp=>pp.id===q.partId); if(!p) return;
+    const g=partGeom(p,q.rot);
+    doc.setLineWidth(0.25); doc.setDrawColor(45,90,168);
+    g.cs.forEach(c=>{
+      const pts=c.pts.map(u=>[ox+(q.x+u[0])*sc, oy+(q.y+u[1])*sc]);
+      for(let k=1;k<pts.length;k++) doc.line(pts[k-1][0],pts[k-1][1],pts[k][0],pts[k][1]);
+      if(c.closed&&pts.length>1) doc.line(pts[pts.length-1][0],pts[pts.length-1][1],pts[0][0],pts[0][1]);
     });
+    doc.setFontSize(7); doc.setTextColor(45,90,168);
+    doc.text(String(idx+1), ox+(q.x+g.w/2)*sc, oy+(q.y+g.h/2)*sc, {align:'center'});
   });
-  doc.save('nested_layout.pdf');
+  doc.save(`MEGAVERKS_${($('qRef').value||'nest').replace(/[^\w-]/g,'_')}_nested.pdf`);
 }
 
-/* ================= Excel export (live formulas) ================= */
-function exportXLS(){
-  const c=CALC; if(!c) return;
-  const F=f=>({f});
-  const wb=XLSX.utils.book_new();
-  /* Rates */
-  const mtlFirst=21;
-  const rws=[
-    ['MEGAVERKS — Rate Master',null],['MOQ / Order qty',c.moq],['Scrap allowance %',c.rates.scrap*100],
-    ['Piercing ₹/pierce',c.rates.pierce],['Laser MS ₹/m',c.rates.laserMS],['Laser SS ₹/m',c.rates.laserSS],
-    ['Punch mm/s',c.rates.punchMM],['Punch ₹/hr',c.rates.punchHr],
-    ['Bend ₹ (qty<100)',c.rates.bendLo],['Bend ₹ (qty≥100)',c.rates.bendHi],
-    ['Weld ₹/in (qty<100)',c.rates.weldLo],['Weld ₹/in (qty≥100)',c.rates.weldHi],
-    ['PC ₹/kg',c.rates.pcKg],['PC ₹/sq.ft',c.rates.pcSf],['Part spacing mm',c.gap],['Edge margin mm',c.edge],
-    ['Assembly ₹/assembly',c.rates.asm],[null,null],['Material','₹/kg','Density g/cc'],
-  ];
-  MTL.forEach(m=>rws.push([m.name,m.rate,m.den]));
-  const wsR=XLSX.utils.aoa_to_sheet(rws); wsR['!cols']=[{wch:26},{wch:12},{wch:14}];
-  XLSX.utils.book_append_sheet(wb,wsR,'Rates');
-  /* Parts */
-  const head=['Part No','Name','Type','Material','Thk mm','L mm','W mm','Qty','CutLen m','Pierces','Bends','Weld in','PC basis',
-    'Wt/pc kg','Wt kg','₹/kg','Mat ₹','Laser ₹','Pierce ₹','Bend ₹','Weld ₹','PC ₹','Total ₹'];
-  const rowsX=[head];
-  const mtlLast=mtlFirst+MTL.length-1;
-  c.rows.forEach((rw,i)=>{
-    const r=i+2;
-    rowsX.push([rw.p.partNo,rw.p.name,rw.p.parent?'Parent':'Child',rw.p.mat,rw.p.thk,rw.p.L,rw.p.W,rw.p.qty,
-      rw.p.cutLen,rw.p.pierces,rw.p.bends,rw.p.weldIn,rw.p.pc,
-      F(`F${r}*G${r}/1000000*E${r}*VLOOKUP(D${r},Rates!$A$${mtlFirst}:$C$${mtlLast},3,0)`),
-      F(`N${r}*H${r}`),
-      F(`VLOOKUP(D${r},Rates!$A$${mtlFirst}:$C$${mtlLast},2,0)`),
-      F(`O${r}*P${r}*(1+Rates!$B$3/100)`),
-      F(rw.p.proc.laser?`I${r}*H${r}*IF(LEFT(D${r},2)="SS",Rates!$B$6,Rates!$B$5)`:0),
-      F(rw.p.proc.laser?`J${r}*H${r}*Rates!$B$4`:0),
-      F(rw.p.proc.bend?`K${r}*H${r}*IF(Rates!$B$2>=100,Rates!$B$10,Rates!$B$9)`:0),
-      F(rw.p.proc.weld?`L${r}*H${r}*IF(Rates!$B$2>=100,Rates!$B$12,Rates!$B$11)`:0),
-      F(rw.p.proc.pc?`IF(M${r}="sf",F${r}*G${r}/1000000*2*10.7639*H${r}*Rates!$B$14,IF(M${r}="kg",O${r}*Rates!$B$13,0))`:0),
-      F(`Q${r}+R${r}+S${r}+T${r}+U${r}+V${r}`)]);
-  });
-  const pr=c.rows.length+2;
-  rowsX.push(['TOTAL','','','','','','','','','','','','',
-    '',F(`SUM(O2:O${pr-1})`),'',F(`SUM(Q2:Q${pr-1})`),F(`SUM(R2:R${pr-1})`),F(`SUM(S2:S${pr-1})`),
-    F(`SUM(T2:T${pr-1})`),F(`SUM(U2:U${pr-1})`),F(`SUM(V2:V${pr-1})`),F(`SUM(W2:W${pr-1})`)]);
-  const wsP=XLSX.utils.aoa_to_sheet(rowsX); wsP['!cols']=head.map(()=>({wch:11}));
-  XLSX.utils.book_append_sheet(wb,wsP,'Parts');
-  /* Nesting */
-  const nx=[['Group','Sheet L','Sheet W','Sheets reqd','In store','Extra to buy','Sheet wt kg','Used wt kg','Net wt kg','Wastage kg','Usage %']];
-  c.nestGroups.forEach(g=>{
-    const big=g.lay.reduce((a,b)=>!a||(b.rw.p.L*b.rw.p.W>a.rw.p.L*a.rw.p.W)?b:a,null);
-    const r=nx.length+1;
-    nx.push([g.mat+' / '+g.thk+'mm',g.s.L,g.s.W,
-      big?F(`CEILING(C${r+0}*0+${big.rw.p.qty}/(INT((${g.s.L}-2*Rates!$B$16+Rates!$B$15)/(${big.rw.p.L}+Rates!$B$15))*INT((${g.s.W}-2*Rates!$B$16+Rates!$B$15)/(${big.rw.p.W}+Rates!$B$15))),1)`):g.sheets,
-      g.s.virtual?0:g.s.qty,
-      F(`MAX(0,D${r}-E${r})`),
-      F(`B${r}*C${r}/1000000*${g.thk}*${g.den}`),
-      F(`D${r}*G${r}`),
-      g.netWt,
-      F(`H${r}-I${r}`),
-      F(`I${r}/H${r}*100`)]);
-  });
-  const wsN=XLSX.utils.aoa_to_sheet(nx); wsN['!cols']=nx[0].map(()=>({wch:13}));
-  XLSX.utils.book_append_sheet(wb,wsN,'Nesting');
-  /* Tubes */
-  const tx=[['Item','Shape','A','B','Wall','Len mm','Qty','Material','kg/m','Wt kg','Cost ₹']];
-  c.tubeRows.forEach((tr,i)=>{
-    const r=i+2;
-    tx.push([tr.t.name,tr.t.shape,tr.t.A,tr.shape==='Rectangular'?tr.t.B:tr.t.A,tr.t.wall,tr.t.len,tr.t.qty,tr.t.mat,
-      F(`IF(B${r}="Round",PI()/4*(C${r}^2-(C${r}-2*E${r})^2),C${r}*D${r}-(C${r}-2*E${r})*(D${r}-2*E${r}))*VLOOKUP(H${r},Rates!$A$${mtlFirst}:$C$${mtlLast},3,0)/1000`),
-      F(`I${r}*F${r}/1000*G${r}`),
-      F(`J${r}*VLOOKUP(H${r},Rates!$A$${mtlFirst}:$C$${mtlLast},2,0)`)]);
-  });
-  const wsT=XLSX.utils.aoa_to_sheet(tx); wsT['!cols']=tx[0].map(()=>({wch:12}));
-  XLSX.utils.book_append_sheet(wb,wsT,'Tubes');
-  /* Summary */
-  const sm=[
-    ['MEGAVERKS — Cost Summary',null],['Customer',$('custName').value||$('custCompany').value||''],
-    ['Ref',$('qRef').value],['Date',new Date().toISOString().slice(0,10)],[null,null],
-    ['Parts material',F(`Parts!Q${pr}`)],['Parts laser',F(`Parts!R${pr}`)],['Parts pierce',F(`Parts!S${pr}`)],
-    ['Parts bend',F(`Parts!T${pr}`)],['Parts weld',F(`Parts!U${pr}`)],['Parts PC',F(`Parts!V${pr}`)],
-    ['Parts subtotal',F(`Parts!W${pr}`)],
-    ['Tubes',c.tubeRows.length?F(`SUM(Tubes!K2:K${c.tubeRows.length+1})`):0],
-    ['Assembly',F(`${c.asmQty}*Rates!$B$17`)],
-    ['Accessories',c.accTot],
-    ['GRAND TOTAL',F(`B8+B9+B10+B11`)],
-  ];
-  const wsS=XLSX.utils.aoa_to_sheet(sm); wsS['!cols']=[{wch:22},{wch:20}];
-  XLSX.utils.book_append_sheet(wb,wsS,'Summary');
-  XLSX.writeFile(wb,'MEGAVERKS_Costing.xlsx');
-  if(typeof clipReact==='function') clipReact('export');
-}
-
-/* ================= Quotation / PDF / share ================= */
-function inWords(n){
-  n=Math.round(n); if(!n) return 'Zero';
-  const a=['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
-  const b=['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
-  const two=x=>x<20?a[x]:b[Math.floor(x/10)]+(x%10?' '+a[x%10]:'');
-  const three=x=>(x>99?a[Math.floor(x/100)]+' Hundred'+(x%100?' ':''):'')+(x%100?two(x%100):'');
-  let s=''; const cr=Math.floor(n/1e7); n%=1e7; const lk=Math.floor(n/1e5); n%=1e5; const th=Math.floor(n/1e3); n%=1e3;
-  if(cr)s+=three(cr)+' Crore '; if(lk)s+=three(lk)+' Lakh '; if(th)s+=three(th)+' Thousand '; if(n)s+=three(n);
-  return s.trim();
-}
-function buildQuoteHTML(){
+/* ================= Share ================= */
+function quoteText(){
   const c=CALC;
-  const procRow=(lbl,v)=>v?`<tr><td>${lbl}</td><td class="num">${f2(v)}</td></tr>`:'';
-  return `<div class="qhead">
-    <div><h1>MEGAVERKS TECHNOLOGIES</h1><div class="qco"><p>Sheet Metal Fabrication · Laser · Punch · Bend · Weld · Powder Coat</p></div></div>
-    <div class="qmeta"><h2>QUOTATION</h2><p>Ref: ${esc($('qRef').value)||'—'}<br>Date: ${new Date().toLocaleDateString('en-IN')}</p></div></div>
-  <div class="qto"><b>To:</b> ${esc($('custName').value)} ${$('custCompany').value?'· '+esc($('custCompany').value):''}<br>
-    ${esc($('custAddr').value)} ${$('custPhone').value?'· Ph: '+esc($('custPhone').value):''}</div>
-  <p class="qintro">Dear Sir/Madam, we thank you for your enquiry and are pleased to quote as follows:</p>
-  <div class="qsub">Components</div>
-  <table class="qtbl"><tr><th>#</th><th>Description</th><th>Mat / t</th><th class="num">L×W mm</th><th class="num">Qty</th>
-    <th class="num">Wt kg</th><th class="num">Rate/pc</th><th class="num">Amount</th></tr>
-  ${c.rows.map((rw,i)=>`<tr><td>${i+1}</td><td>${esc(rw.p.partNo?rw.p.partNo+' — ':'')}${esc(rw.p.name)}</td>
-    <td>${rw.p.mat} / ${rw.p.thk}</td><td class="num">${rw.p.L}×${rw.p.W}</td><td class="num">${rw.p.qty}</td>
-    <td class="num">${f3(rw.wtTot)}</td><td class="num">${f2(rw.tot/rw.p.qty)}</td><td class="num">${f2(rw.tot)}</td></tr>`).join('')}
-  </table>
-  <div class="qsub">Process Cost Breakup</div>
-  <table class="qtbl">
-    ${procRow('Material (incl. scrap allowance)',c.totMat)}${procRow('Laser / Punch cutting',c.totLas)}
-    ${procRow('Piercing',c.totPie)}${procRow('Bending',c.totBnd)}${procRow('Welding',c.totWld)}
-    ${procRow('Powder coating',c.totPC)}${procRow('Tubes & sections',c.tubeTot)}
-    ${procRow('Assembly ('+c.asmQty+' nos)',c.asmCost)}${procRow('Accessories / bought-out',c.accTot)}
-    <tr class="grand"><td>GRAND TOTAL</td><td class="num">₹ ${f2(c.grand)}</td></tr></table>
-  <p class="qwords"><b>Amount in words:</b> Rupees ${inWords(c.grand)} Only.</p>
-  <div class="qsub">Material &amp; Weight Summary</div>
-  <table class="qtbl"><tr><td>Net component weight</td><td class="num">${f3(c.totNetWt)} kg</td>
-    <td>Raw sheets</td><td class="num">${c.totSheets} × (${esc(c.sheetDesc)} mm)</td>
-    <td>Sheet weight</td><td class="num">${f3(c.totSheetWt)} kg</td>
-    <td>Wastage</td><td class="num">${f3(c.wasteWt)} kg</td></tr></table>
-  <div class="qsub">Terms</div>
-  <ol class="qterms"><li>Prices are ex-works; GST extra at actuals.</li><li>Delivery: 2–3 weeks from PO &amp; drawing approval.</li>
-    <li>Payment: 50% advance, balance before dispatch.</li><li>Quote validity: 15 days.</li></ol>
-  <div class="qsign"><div><div class="sig"></div><b>For MEGAVERKS TECHNOLOGIES</b><br>Authorised Signatory</div></div>`;
-}
-function printQuote(){
-  $('quoteDoc').innerHTML=buildQuoteHTML();
-  document.body.classList.add('qmode');
-  setTimeout(()=>{ window.print(); document.body.classList.remove('qmode'); },60);
-  if(typeof clipCelebrate==='function') clipCelebrate();
-}
-function exportPDF(){
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF('p','mm','a4');
-  const c=CALC;
-  doc.setFontSize(16); doc.text('MEGAVERKS TECHNOLOGIES — Quotation',14,16);
-  doc.setFontSize(10);
-  doc.text(`Ref: ${$('qRef').value||'—'}   Date: ${new Date().toLocaleDateString('en-IN')}`,14,23);
-  doc.text(`To: ${$('custName').value||''} ${$('custCompany').value?'· '+$('custCompany').value:''}`,14,29);
-  doc.autoTable({startY:34,head:[['#','Description','Mat/t','L×W','Qty','Wt kg','Amount ₹']],
-    body:c.rows.map((rw,i)=>[i+1,(rw.p.partNo?rw.p.partNo+' — ':'')+rw.p.name,rw.p.mat+'/'+rw.p.thk,
-      rw.p.L+'×'+rw.p.W,rw.p.qty,f3(rw.wtTot),f2(rw.tot)]),
-    styles:{fontSize:8},theme:'grid'});
-  let y=doc.lastAutoTable.finalY+6;
-  doc.autoTable({startY:y,head:[['Process','Amount ₹']],
-    body:[['Material',f2(c.totMat)],['Laser/Punch',f2(c.totLas)],['Piercing',f2(c.totPie)],
-      ['Bending',f2(c.totBnd)],['Welding',f2(c.totWld)],['Powder coat',f2(c.totPC)],
-      ['Tubes',f2(c.tubeTot)],['Assembly',f2(c.asmCost)],['Accessories',f2(c.accTot)],
-      ['GRAND TOTAL',f2(c.grand)]].filter(r=>+r[1].replace(/,/g,'')>0||r[0]==='GRAND TOTAL'),
-    styles:{fontSize:8},theme:'grid'});
-  doc.save('MEGAVERKS_Quotation.pdf');
-  if(typeof clipCelebrate==='function') clipCelebrate();
-}
-function rmReportPDF(){
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF('landscape','mm','a4');
-  const c=CALC;
-  doc.setFontSize(14); doc.text('MEGAVERKS — Raw Material Usage & Analysis',14,14);
-  doc.autoTable({startY:20,
-    head:[['Group','Sheet mm','In stock','Sheets','Extra','Sheet wt','Used wt','Net wt','Waste wt','Usage %','Waste %']],
-    body:c.nestGroups.map(g=>[g.mat+' / '+g.thk+'mm',g.s.L+'×'+g.s.W,g.s.virtual?'—':g.s.qty,g.sheets,
-      Math.max(0,g.sheets-(g.s.virtual?0:g.s.qty)),f3(g.sheetWt),f3(g.usedWt),f3(g.netWt),f3(g.wasteWt),
-      f2(g.util)+'%',f2(g.usedWt?g.wasteWt/g.usedWt*100:0)+'%']),
-    styles:{fontSize:8},theme:'grid'});
-  let x=14, y=doc.lastAutoTable.finalY+8;
-  c.nestGroups.forEach(g=>{
-    g.lay.forEach(({rw,lay,sheets})=>{
-      if(!lay.n||!lay.placements.length) return;
-      for(let sIdx=0;sIdx<sheets;sIdx++){
-        const sc=Math.min(1,80/g.s.L);
-        if(x+g.s.L*sc>285){x=14;y+=g.s.W*sc+18; if(y>160){doc.addPage();y=14;}}
-        const pcsThis=Math.min(lay.n,rw.p.qty-sIdx*lay.n);
-        doc.setFontSize(7);
-        doc.text(`${rw.p.name} ${rw.p.parent?'[PARENT]':'[CHILD]'} — sheet ${sIdx+1}/${sheets} · ${pcsThis} pcs · usage ${f2(pcsThis*rw.areaM2/g.areaM2*100)}%`,x,y);
-        doc.rect(x,y+2,g.s.L*sc,g.s.W*sc);
-        lay.placements.slice(0,pcsThis).forEach(pl=>{
-          doc.setFillColor(pl.strip?245:61,pl.strip?201:123,pl.strip?138:224);
-          doc.rect(x+pl.x*sc,y+2+pl.y*sc,pl.w*sc,pl.h*sc,'FD');
-        });
-        x+=g.s.L*sc+8;
-      }
-    });
-  });
-  doc.save('MEGAVERKS_RawMaterial_Report.pdf');
+  let t=`*MEGAVERKS TECHNOLOGIES — Quotation*\nRef: ${$('qRef').value||'—'} | MOQ: ${c.moq}\n`;
+  c.rows.forEach((rw,i)=>{t+=`${i+1}. ${rw.p.name} (${rw.p.mat} ${rw.p.thk}mm) ×${rw.p.qty} — ${f3(rw.wtTot)}kg — ₹${f2(rw.tot)}\n`;});
+  c.tubeRows.forEach(({t,wt,cost})=>{t+=`• ${t.name} ${t.shape} ${t.A}×${t.shape==='Square'?t.A:t.B}×${t.wall} L${t.len} ×${t.qty} — ${f3(wt)}kg — ₹${f2(cost)}\n`;});
+  t+=`Accessories: ₹${f2(c.accTot)}\n*GRAND TOTAL: ₹${f2(c.grand)}*\n`;
+  t+=`Sheets: ${c.totSheets} (${f3(c.totSheetWt)}kg) | Net: ${f3(c.totNetWt)}kg | Wastage: ${f3(c.wasteWt)}kg`;
+  return t;
 }
 function shareWA(){
-  const c=CALC, ph=$('custPhone').value.replace(/\D/g,'');
-  const t=`MEGAVERKS TECHNOLOGIES — Quotation ${$('qRef').value||''}
-Dear ${$('custName').value||'Sir/Madam'},
-Parts total: ₹${f2(c.totAll)}
-Tubes: ₹${f2(c.tubeTot)} | Assembly: ₹${f2(c.asmCost)} | Accessories: ₹${f2(c.accTot)}
-*GRAND TOTAL: ₹${f2(c.grand)}* (${inWords(c.grand)})
-Weight: net ${f3(c.totNetWt)} kg, sheets ${f3(c.totSheetWt)} kg. Valid 15 days.`;
-  open('https://wa.me/'+ph+'?text='+encodeURIComponent(t),'_blank');
+  if(!CALC||!CALC.rows.length){alert('Add at least one part first.');return;}
+  const ph=($('custPhone').value||'').replace(/\D/g,'');
+  window.open(`https://wa.me/${ph}?text=${encodeURIComponent(quoteText())}`,'_blank');
 }
 function shareEmail(){
-  const c=CALC;
-  const body=`Dear ${$('custName').value||'Sir/Madam'},\n\nQuotation ${$('qRef').value||''}\nGrand total: ₹ ${f2(c.grand)}\nNet weight ${f3(c.totNetWt)} kg.\n\nRegards,\nMEGAVERKS TECHNOLOGIES`;
-  location.href='mailto:'+$('custEmail').value+'?subject='+encodeURIComponent('Quotation '+($('qRef').value||''))+'&body='+encodeURIComponent(body);
+  if(!CALC||!CALC.rows.length){alert('Add at least one part first.');return;}
+  location.href=`mailto:${$('custEmail').value}?subject=${encodeURIComponent('Quotation '+($('qRef').value||'')+' — MEGAVERKS TECHNOLOGIES')}&body=${encodeURIComponent(quoteText())}`;
 }
 
-/* ================= Cloud v2: admin, operators, library, leaderboard ================= */
+/* ================= View switcher ================= */
 function switchView(v){
-  document.body.classList.toggle('view-admin',v==='admin');
-  $('tabCost').classList.toggle('on',v!=='admin');
-  $('tabAdmin').classList.toggle('on',v==='admin');
-  localStorage.setItem('mv_view',v);
+  document.body.classList.toggle('view-admin', v==='admin');
+  $('tabCost').classList.toggle('on', v!=='admin');
+  $('tabAdmin').classList.toggle('on', v==='admin');
+  localStorage.setItem('mv_view', v);
   if(v==='admin'){ lbRefresh(); libRefresh(); }
 }
+
+/* ================= Customer auto backup & retrieve (master sheet) ================= */
+let __custDB=[], __custTimer=null;
+function custFields(){
+  return {name:$('custCompany').value.trim(), contact:$('custName').value.trim(),
+    phone:$('custPhone').value.trim(), email:$('custEmail').value.trim(), addr:$('custAddr').value.trim()};
+}
+async function custPush(){
+  const cfg=adminCfg(), c=custFields();
+  if(!cfg.url||!c.name) return;
+  try{
+    await fetch(cfg.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({action:'save_customer',...cfg,customer:c})});
+  }catch(e){}
+}
+function custPushDebounced(){ clearTimeout(__custTimer); __custTimer=setTimeout(custPush,2500); }
+async function custPull(){
+  const cfg=adminCfg(); if(!cfg.url) return;
+  try{
+    const r=await fetch(cfg.url+'?action=customers&master='+encodeURIComponent(cfg.master));
+    const d=await r.json();
+    if(d&&d.customers) __custDB=d.customers;
+    // merge into library customer dropdown
+    const sel=$('libCust');
+    const existing=new Set([...sel.options].map(o=>o.value));
+    __custDB.forEach(c=>{ if(c.name&&!existing.has(c.name)){ sel.add(new Option(c.name,c.name)); existing.add(c.name); } });
+    // auto-restore the last customer worked on
+    const last=localStorage.getItem('mv_lastcust');
+    if(last){
+      const hit=__custDB.find(c=>c.name===last);
+      if(hit&&!$('custCompany').value){
+        $('custCompany').value=hit.name||''; $('custName').value=hit.contact||'';
+        $('custPhone').value=hit.phone||''; $('custEmail').value=hit.email||''; $('custAddr').value=hit.addr||'';
+      }
+    }
+    lbRefresh();
+  }catch(e){}
+}
+function hookCustAutoBackup(){
+  ['custCompany','custName','custPhone','custEmail','custAddr'].forEach(id=>{
+    $(id).addEventListener('input',()=>{
+      localStorage.setItem('mv_lastcust',$('custCompany').value.trim());
+      custPushDebounced();
+    });
+  });
+}
+
+/* ================= Leaderboard (from master sheet Quotation Index) ================= */
+async function lbRefresh(){
+  const tbl=$('lbTbl'); if(!tbl) return;
+  const cfg=adminCfg();
+  if(!cfg.url){ tbl.innerHTML='<tr><td style="color:#77848F">Set the Apps Script URL &amp; Master Sheet ID in Admin settings above.</td></tr>'; return; }
+  tbl.innerHTML='<tr><td style="color:#77848F">Reading master sheet…</td></tr>';
+  try{
+    const r=await fetch(cfg.url+'?action=index&master='+encodeURIComponent(cfg.master));
+    const d=await r.json();
+    const rows=(d&&d.index)||[];
+    // aggregate per customer
+    const agg={};
+    rows.forEach(x=>{
+      const k=x.customer||'—';
+      (agg[k]=agg[k]||{customer:k,quotes:0,total:0,last:'',lastGrand:0,by:new Set(),products:new Set()});
+      const a=agg[k]; a.quotes++; a.total+=+x.grand||0;
+      if((x.date||'')>=a.last){ a.last=x.date||''; a.lastGrand=+x.grand||0; }
+      if(x.by) a.by.add(x.by);
+      if(x.product) a.products.add(x.product);
+    });
+    // enrich with customer contact data
+    const meta={}; __custDB.forEach(c=>meta[c.name]=c);
+    const list=Object.values(agg).sort((a,b)=>b.total-a.total);
+    let h=`<tr><th>#</th><th>Customer</th><th>Contact</th><th>Phone</th><th class="num">Products</th>
+      <th class="num">Quotations</th><th class="num">Latest value ₹</th><th>Latest date</th>
+      <th class="num">Total value ₹</th><th>Worked by</th></tr>`;
+    if(!list.length) h+='<tr><td colspan="10" style="color:#77848F">No quotations in the master sheet yet.</td></tr>';
+    list.forEach((a,i)=>{
+      const m=meta[a.customer]||{};
+      h+=`<tr><td>${i+1}</td><td><b>${esc(a.customer)}</b></td><td>${esc(m.contact||'—')}</td><td>${esc(m.phone||'—')}</td>
+        <td class="num">${a.products.size}</td><td class="num">${a.quotes}</td>
+        <td class="num">${f2(a.lastGrand)}</td><td>${esc(a.last)||'—'}</td>
+        <td class="num lb-total">${f2(a.total)}</td><td>${esc([...a.by].join(', ')||'—')}</td></tr>`;
+    });
+    // customers with details but no quotations yet
+    const extra=__custDB.filter(c=>c.name&&!agg[c.name]);
+    if(extra.length){
+      h+='<tr><td colspan="10" style="background:#F7F9FB;color:#77848F">Customers on record (no quotation yet)</td></tr>';
+      extra.forEach(c=>{ h+=`<tr><td>—</td><td>${esc(c.name)}</td><td>${esc(c.contact||'—')}</td><td>${esc(c.phone||'—')}</td><td colspan="6" style="color:#98A5B1">${esc(c.addr||'')}</td></tr>`; });
+    }
+    tbl.innerHTML=h;
+    $('lbHint').textContent=`${list.length} customer(s) · ${rows.length} quotation(s) tracked — synced from the master sheet.`;
+  }catch(e){ tbl.innerHTML=`<tr><td style="color:var(--danger)">Leaderboard read failed — check URL, Master Sheet ID & deployment. (${esc(e.message)})</td></tr>`; }
+}
+
+/* ================= Cloud v2: folders, revisions, operators, logging ================= */
+function saveCloudUrl(){ localStorage.setItem('mv_cloud',$('cloudUrl').value); }
 function adminCfg(){
-  return {url:$('cloudUrl').value.trim(), master:$('sheetMaster').value.trim(),
-    sheetQ:$('sheetMaster').value.trim(), sheetLog:$('sheetMaster').value.trim(),
-    root:$('driveRoot').value.trim()||'MEGAVERKS Costing & Quotation Generator',
-    operator:$('opName').value||''};
+  const master=($('sheetMaster').value||'').trim();
+  return { url:($('cloudUrl').value||'').trim(),
+    master,
+    sheetQ:master, sheetLog:master,   // legacy payload keys → master
+    root:($('driveRoot').value||'').trim()||'MEGAVERKS Costing & Quotation Generator',
+    operator:($('opName').value||'').trim()||'Unknown' };
 }
 function saveAdmin(){
-  localStorage.setItem('mv_admin',JSON.stringify({
-    master:$('sheetMaster').value, root:$('driveRoot').value}));
+  localStorage.setItem('mv_admin',JSON.stringify({master:$('sheetMaster').value,root:$('driveRoot').value}));
 }
 function loadAdmin(){
   try{ const a=JSON.parse(localStorage.getItem('mv_admin')||'{}');
-    if(a.master!=null) $('sheetMaster').value=a.master;
-    if(a.root!=null) $('driveRoot').value=a.root; }catch(e){}
+    $('sheetMaster').value=a.master||a.sheetQ||''; $('driveRoot').value=a.root||'';
+  }catch(e){}
 }
-function saveCloudUrl(){ localStorage.setItem('mv_cloud',$('cloudUrl').value.trim()); }
 /* operators */
-function opList(){ try{return JSON.parse(localStorage.getItem('mv_ops')||'[]');}catch(e){return [];} }
+function opList(){ try{ return JSON.parse(localStorage.getItem('mv_ops')||'[]'); }catch(e){ return []; } }
 function renderOps(){
-  const ops=opList(), cur=localStorage.getItem('mv_op')||'';
-  $('opName').innerHTML='<option value="">— select name —</option>'+ops.map(o=>`<option ${o===cur?'selected':''}>${esc(o)}</option>`).join('');
+  const ops=opList(), sel=$('opName');
+  sel.innerHTML=ops.map(o=>`<option ${o===localStorage.getItem('mv_op')?'selected':''}>${esc(o)}</option>`).join('')||'<option value="">— add your name —</option>';
 }
 function addOperator(){
   const n=$('opNew').value.trim(); if(!n) return;
   const ops=opList(); if(!ops.includes(n)) ops.push(n);
   localStorage.setItem('mv_ops',JSON.stringify(ops));
-  localStorage.setItem('mv_op',n); $('opNew').value=''; renderOps();
+  localStorage.setItem('mv_op',n); $('opNew').value='';
+  renderOps();
 }
 function saveOpName(){ localStorage.setItem('mv_op',$('opName').value); }
-/* ---- customer auto backup / retrieve ---- */
-function custFields(){
-  return {company:$('custCompany').value,name:$('custName').value,phone:$('custPhone').value,
-    email:$('custEmail').value,addr:$('custAddr').value};
-}
-let __custT=null, __custDB=[];
-async function custPush(){
-  const cfg=adminCfg(); if(!cfg.url||!cfg.master) return;
-  const cf=custFields(); if(!cf.name&&!cf.company) return;
-  try{
-    await fetch(cfg.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({action:'save_customer',...cfg,cust:cf})});
-    localStorage.setItem('mv_lastcust',JSON.stringify(cf));
-  }catch(e){}
-}
-function custPushDebounced(){ clearTimeout(__custT); __custT=setTimeout(custPush,2500); }
-function hookCustAutoBackup(){
-  ['custCompany','custName','custPhone','custEmail','custAddr'].forEach(id=>{
-    $(id).addEventListener('input',()=>{ custPushDebounced(); lbRefreshLocal(); });
-  });
-}
-function lbRefreshLocal(){
-  const cf=custFields();
-  const i=__custDB.findIndex(x=>x.name===cf.name&&x.company===cf.company);
-  if(i>=0) __custDB[i]=cf; else if(cf.name||cf.company) __custDB.push(cf);
-  lbRender();
-}
-async function custPull(){
-  const cfg=adminCfg();
-  // restore last customer instantly, then refresh from cloud
-  try{ const lc=JSON.parse(localStorage.getItem('mv_lastcust')||'null');
-    if(lc){ $('custCompany').value=lc.company||''; $('custName').value=lc.name||'';
-      $('custPhone').value=lc.phone||''; $('custEmail').value=lc.email||''; $('custAddr').value=lc.addr||''; } }catch(e){}
-  if(!cfg.url||!cfg.master) return;
-  try{
-    const r=await fetch(cfg.url+'?action=customers&master='+encodeURIComponent(cfg.master));
-    __custDB=await r.json(); lbRender();
-  }catch(e){}
-}
-/* ---- leaderboard ---- */
-async function lbRefresh(){
-  const cfg=adminCfg(); const tbl=$('lbTbl');
-  if(!cfg.url||!cfg.master){ tbl.innerHTML='<tr><td style="color:#77848F">Set the Apps Script URL &amp; master Sheet ID above, then refresh.</td></tr>'; return; }
-  tbl.innerHTML='<tr><td style="color:#77848F">Loading…</td></tr>';
-  try{
-    const r=await fetch(cfg.url+'?action=index&master='+encodeURIComponent(cfg.master));
-    const rows=await r.json();
-    const rc=await fetch(cfg.url+'?action=customers&master='+encodeURIComponent(cfg.master));
-    __custDB=await rc.json();
-    lbRender(rows);
-  }catch(e){ tbl.innerHTML=`<tr><td style="color:var(--danger)">Leaderboard failed: ${esc(e.message)}</td></tr>`; }
-}
-function lbRender(index){
-  const agg={};
-  (index||[]).forEach(q=>{
-    const k=q.customer||'(unknown)';
-    (agg[k]=agg[k]||{n:0,grand:0,last:'',prods:new Set()}).n++;
-    agg[k].grand+=+q.grand||0; agg[k].last=q.date||agg[k].last; agg[k].prods.add(q.product);
-  });
-  let h=`<tr><th>Customer</th><th>Contact</th><th class="num">Quotations</th><th class="num">Products</th><th>Latest</th><th class="num">Total quoted ₹</th></tr>`;
-  const names=new Set([...Object.keys(agg),...__custDB.map(x=>x.company||x.name)]);
-  if(!names.size) h+='<tr><td colspan="6" style="color:#77848F">No cloud data yet — customer details typed on the Costing page appear here automatically.</td></tr>';
-  [...names].sort().forEach(n=>{
-    const a=agg[n]||{n:0,grand:0,last:'—',prods:new Set()};
-    const cd=__custDB.find(x=>(x.company||x.name)===n)||{};
-    h+=`<tr><td><b>${esc(n)}</b></td><td>${esc(cd.name||'')}${cd.phone?' · '+esc(cd.phone):''}</td>
-      <td class="num">${a.n}</td><td class="num">${a.prods.size}</td><td>${esc(a.last||'—')}</td>
-      <td class="num lb-total">${a.grand?f2(a.grand):'—'}</td></tr>`;
-  });
-  $('lbTbl').innerHTML=h;
-}
-/* ---- save quotation ---- */
+/* DXF of a single part from its contours (mm) */
 function dxfFromPart(p){
-  if(!p.contours||!p.contours.length) return null;
-  let o='0\nSECTION\n2\nENTITIES\n';
-  p.contours.forEach(ct=>{
-    o+='0\nLWPOLYLINE\n90\n'+ct.pts.length+'\n70\n'+(ct.closed?'1':'0')+'\n';
-    ct.pts.forEach(q=>{ o+='10\n'+q.x.toFixed(3)+'\n20\n'+(p.W-q.y).toFixed(3)+'\n'; });
+  let d='0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n';
+  const g=partGeom(p,0);
+  g.cs.forEach(c=>{
+    d+='0\nLWPOLYLINE\n8\n0\n90\n'+c.pts.length+'\n70\n'+(c.closed?1:0)+'\n';
+    // contours are screen (y-down) → flip back to DXF y-up
+    c.pts.forEach(u=>{ d+='10\n'+u[0].toFixed(3)+'\n20\n'+(-u[1]).toFixed(3)+'\n'; });
   });
-  return o+'0\nENDSEC\n0\nEOF\n';
+  return d+'0\nENDSEC\n0\nEOF';
 }
-function libCustomer(){ return $('libCustNew').value.trim()||$('libCust').value||$('custCompany').value||$('custName').value||'General'; }
-function libProductName(){ return $('libProduct').value.trim()||$('qRef').value||'Costing'; }
+function libCustomer(){ return ($('libCustNew').value||'').trim()||$('libCust').value||($('custCompany').value||'').trim()||'General'; }
+function libProductName(){ return ($('libProduct').value||'').trim()||($('qRef').value||'').trim()||'Quotation'; }
 async function readFilesB64(inp){
   const out=[];
   for(const f of inp.files){
-    const b=await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result.split(',')[1]);r.readAsDataURL(f);});
-    out.push({name:f.name,mime:f.type||'application/octet-stream',data:b});
+    out.push({name:f.name, type:f.type||'application/octet-stream',
+      data:(await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result.split(',')[1]);r.readAsDataURL(f);}))});
   }
   return out;
 }
 async function cloudSaveV2(){
+  if(!CALC||(!CALC.rows.length&&!CALC.tubeRows.length)){alert('Add at least one part or tube first.');return;}
   const cfg=adminCfg();
-  if(!cfg.url){ $('libHint').textContent='Set the Apps Script URL in Admin & Cloud Settings first.'; switchView('admin'); return; }
-  if(!cfg.operator){ $('libHint').textContent='Select your name under "Who is working?" first.'); return; }
+  if(!cfg.url){alert('Paste your Apps Script URL in Admin & Cloud Settings first.');return;}
+  if(!cfg.operator||cfg.operator==='Unknown'){alert('Select or add your name under "Who is working?" first.');return;}
   const st=$('cloudStatus'); st.className='cloud-status pending'; st.textContent='Saving…';
   $('libHint').textContent='Uploading to Drive…';
   try{
@@ -1776,7 +1991,7 @@ async function cloudSaveV2(){
       action:'save_quote', ...cfg,
       customer:libCustomer(), product:libProductName(),
       ref:$('qRef').value, date:new Date().toISOString().slice(0,10),
-      cust:custFields(),
+      cust:{company:$('custCompany').value,name:$('custName').value,phone:$('custPhone').value,email:$('custEmail').value,addr:$('custAddr').value},
       moq:CALC.moq, grand:+CALC.grand.toFixed(2),
       weights:{net:+CALC.totNetWt.toFixed(3),sheets:+CALC.totSheetWt.toFixed(3),waste:+CALC.wasteWt.toFixed(3),count:CALC.totSheets},
       rates:CALC.rates, materials:MTL, store:INV,
@@ -1846,6 +2061,7 @@ async function libLoad(cust,prod,rev){
     st.textContent='Loading '+cust+' / '+prod+' / '+rev+' …';
     const q=await libFetch('action=load&customer='+encodeURIComponent(cust)+'&product='+encodeURIComponent(prod)+'&rev='+encodeURIComponent(rev));
     if(!q||!q.parts) throw new Error('empty response');
+    // restore
     $('custCompany').value=q.cust?.company||''; $('custName').value=q.cust?.name||'';
     $('custPhone').value=q.cust?.phone||''; $('custEmail').value=q.cust?.email||''; $('custAddr').value=q.cust?.addr||'';
     $('qRef').value=q.ref||'';
@@ -1881,6 +2097,7 @@ function clipSay(html,gesture){
   $('clipMsg').innerHTML=html;
   const clip=$('clip');
   clip.classList.remove('hop'); void clip.offsetWidth; clip.classList.add('hop');
+  // (image-based Clip: gestures are done via whole-body CSS animations)
   clearTimeout(clipTimer);
   clipTimer=setTimeout(()=>{},2600);
 }
